@@ -22,12 +22,20 @@ const COLUMNS = [
   "Action",
 ];
 
-/** Order a course's meetings: non-finals first (LE before the rest), finals last. */
+const DATED_RE = /\d{1,2}\/\d{1,2}\/\d{4}/;
+
+/** A one-off dated exam that isn't a final (e.g. a midterm): dated, non-weekly, not final. */
+function isDatedExam(m: Meeting): boolean {
+  return !m.isFinal && m.days.length === 0 && DATED_RE.test(m.raw);
+}
+
+/** Order a course's meetings: weekly first (LE before the rest), then dated exams, finals last. */
 function orderMeetings(group: CourseGroup): Meeting[] {
   const meetings: Meeting[] = [];
   for (const ps of group.planned) meetings.push(...ps.section.meetings);
   const rank = (m: Meeting): number => {
-    if (m.isFinal) return 2;
+    if (m.isFinal) return 3;
+    if (isDatedExam(m)) return 2;
     return m.method === "LE" ? 0 : 1;
   };
   return meetings
@@ -42,15 +50,18 @@ function timeRange(start: string | null, end: string | null): string {
 
 /** Build the <td> cells for one meeting row: Type, Instructor, Days, Time, Location. */
 function meetingCells(m: Meeting): HTMLElement[] {
-  if (m.isFinal) {
-    const final = parseFinal(m);
-    const time = [final.date, timeRange(final.start, final.end)]
+  // Finals and other dated exams (midterms) are one-off: show the exam date + weekday, not a
+  // weekly day list. Type is "FI" for finals, "MI" for midterms, "EX" for any other dated exam.
+  if (m.isFinal || isDatedExam(m)) {
+    const info = parseFinal(m);
+    const time = [info.date, timeRange(info.start, info.end)]
       .filter(Boolean)
       .join(" ");
+    const type = m.isFinal ? "FI" : /midterm/i.test(m.raw) ? "MI" : "EX";
     return [
-      h("td", { class: "tsh-list-type", text: "FI" }),
+      h("td", { class: "tsh-list-type", text: type }),
       h("td", { class: "tsh-list-inst", text: m.instructor ?? "" }),
-      h("td", { class: "tsh-list-days", text: final.day ?? "—" }),
+      h("td", { class: "tsh-list-days", text: info.day ?? "—" }),
       h("td", { class: "tsh-list-time", text: time || "—" }),
       h("td", { class: "tsh-list-loc", text: m.location ?? "" }),
     ];

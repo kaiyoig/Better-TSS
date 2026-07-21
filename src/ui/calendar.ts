@@ -6,7 +6,13 @@ import {
   sectionBlocks,
   totalUnits,
 } from "../model/schedule";
-import { courseKey, dropCourse, groupByCourse } from "../model/planOps";
+import {
+  courseKey,
+  datedExams,
+  dropCourse,
+  examConflicts,
+  groupByCourse,
+} from "../model/planOps";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
 import { confirmDrop } from "./util";
@@ -84,6 +90,34 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
       );
     }
     wrap.append(header);
+
+    // Dated exams (midterms, etc.) don't belong on the weekly grid — surface them as notes above
+    // it, flagging any that collide with an existing weekly class on the same weekday/time.
+    const exams = datedExams(planned);
+    if (exams.length > 0) {
+      const notes = h("div", { class: "tsh-cal-notes" }, [
+        h("div", { class: "tsh-cal-notes-title", text: "Exams (not on grid)" }),
+      ]);
+      for (const { course, exam } of exams) {
+        const clashes = examConflicts(exam, planned, courseKey(course));
+        const row = h("div", {
+          class: `tsh-cal-note${clashes.length > 0 ? " tsh-cal-note-conflict" : ""}`,
+        }, [
+          h("span", { class: "tsh-cal-note-abbr", text: course.abbr }),
+          ` ${exam.meeting.raw}`,
+        ]);
+        if (clashes.length > 0) {
+          row.append(
+            h("div", {
+              class: "tsh-cal-note-warn",
+              text: `⚠ Time conflict with ${clashes.join(", ")}`,
+            }),
+          );
+        }
+        notes.append(row);
+      }
+      wrap.append(notes);
+    }
 
     // Which day columns to show: Mon–Fri always, plus any weekend day with a block.
     const present = new Set<Day>();
@@ -245,6 +279,28 @@ export const CALENDAR_EXTRA_STYLES = `
   box-sizing: border-box;
 }
 .tsh-ev-drop:hover { background: #fef2f2; }
+
+/* Dated-exam notes above the grid (midterms, etc.). */
+.tsh-cal-notes {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.tsh-cal-notes-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+.tsh-cal-note { font-size: 12px; color: #475569; }
+.tsh-cal-note-abbr { font-weight: 700; color: #1a1f2b; }
+.tsh-cal-note-conflict { color: #b91c1c; }
+.tsh-cal-note-warn { font-size: 11px; font-weight: 600; color: #b91c1c; }
 
 /* Per-course Drop button in the list beneath the grid. */
 .tsh-course-drop {
