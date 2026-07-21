@@ -219,36 +219,26 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
 // Injected into the shadow-root stylesheet by the integrator (see panel wiring). Only classes
 // introduced by this component live here; existing `.tsh-*` classes come from styles.ts.
 export const CALENDAR_EXTRA_STYLES = `
-/* Per-block Drop control, pinned to the event block's bottom-right corner. Faint until the
-   block is hovered/focused, but always clickable (not tooltip-only). It may overlap the last
-   detail line on very short (~50-minute) blocks rather than clip the time/course lines. */
+/* Per-block Drop control: sits underneath the block's detail lines as a full-width button.
+   Solid white with a red border so it stands out against the colored block. On very short
+   (~50-minute) blocks it may be clipped by the block's height rather than overlapping the text. */
 .tsh-ev-drop {
-  position: absolute;
-  right: 2px;
-  bottom: 2px;
-  z-index: 1;
-  padding: 0 4px;
-  border: 1px solid rgba(0, 0, 0, 0.18);
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+  padding: 1px 4px;
+  border: 1px solid #dc2626;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.9);
+  background: #fff;
   color: #b91c1c;
   font: inherit;
   font-size: 9px;
   font-weight: 700;
-  line-height: 1.3;
+  line-height: 1.4;
   cursor: pointer;
-  opacity: 0.35;
-  transition: opacity 0.12s ease;
+  box-sizing: border-box;
 }
-.tsh-ev:hover .tsh-ev-drop,
-.tsh-ev-drop:focus-visible {
-  opacity: 1;
-}
-.tsh-ev-drop:hover {
-  opacity: 1;
-  background: #fef2f2;
-  border-color: #fca5a5;
-}
+.tsh-ev-drop:hover { background: #fef2f2; }
 
 /* Per-course Drop button in the list beneath the grid. */
 .tsh-course-drop {
