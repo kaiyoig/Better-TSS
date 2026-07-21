@@ -109,9 +109,9 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
   const content = h("div", { class: "tsh-content" }, [
     termSelector.el,
     plansSwitcher.el,
-    calendar.el,
     search.el,
     sections.el,
+    calendar.el,
   ]);
 
   const drawer = h("div", { class: "tsh-drawer" }, [header, content]);
