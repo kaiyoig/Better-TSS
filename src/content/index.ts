@@ -1,14 +1,14 @@
 import { TssClient } from "../api/tss";
+import { createPlanStore } from "../storage/planStore";
+import { mountPanel } from "../ui/panel";
 
-// Phase 1 smoke test: instantiate the client and expose it on the page for manual poking from
-// the DevTools console while we build the planner UI (Phase 3). No UI injected yet.
+// Phase 3: mount the WebReg-style planner overlay on the TSS page. The panel renders entirely
+// inside a Shadow DOM host, so it never depends on (or collides with) SAP Fiori's markup.
 const client = new TssClient();
+const store = createPlanStore();
 
-// e.g. in the TSS tab console:
-//   await window.__tssHook.searchCourses({ term: {year:'2026',period:'2',
-//     yearText:'2026/2027', periodText:'Fall Quarter'}, query: 'CSE-103' })
-(window as unknown as { __tssHook: TssClient }).__tssHook = client;
+mountPanel(client, store);
 
-console.info("[TSS Hook] content script ready — client on window.__tssHook");
+console.info("[TSS Hook] planner overlay mounted");
 
 export {};
