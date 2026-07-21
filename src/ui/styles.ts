@@ -244,8 +244,28 @@ export const STYLES = `
   box-sizing: border-box;
   border: 1px solid rgba(0, 0, 0, 0.12);
 }
+.tsh-ev > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tsh-ev-abbr { font-weight: 700; }
 .tsh-ev-time { opacity: 0.75; }
+.tsh-ev-loc { opacity: 0.85; }
+.tsh-ev-inst { opacity: 0.85; font-style: italic; }
+
+/* Method legend under the grid */
+.tsh-cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 11px;
+  color: #64748b;
+  padding: 2px 2px 0;
+}
+.tsh-legend-code {
+  font-weight: 700;
+  color: #334155;
+  background: #e2e8f0;
+  border-radius: 4px;
+  padding: 0 4px;
+}
 .tsh-ev-conflict {
   border: 2px solid #dc2626;
   background-image: repeating-linear-gradient(

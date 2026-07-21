@@ -11,7 +11,7 @@ import { clear, h } from "./dom";
 
 const START_MIN = 8 * 60; // 8:00 AM
 const END_MIN = 22 * 60; // 10:00 PM
-const PX_PER_MIN = 46 / 60; // one hour ≈ 46px
+const PX_PER_MIN = 64 / 60; // one hour ≈ 64px — tall enough to fit method/location/instructor
 const BODY_HEIGHT = (END_MIN - START_MIN) * PX_PER_MIN;
 
 const BASE_DAYS = new Set<Day>(["M", "Tu", "W", "Th", "F"]);
@@ -116,25 +116,39 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
     }
     gutter.style.height = `${BODY_HEIGHT}px`;
 
-    // Place blocks, keeping each meeting's method for the label.
+    // Place blocks. Each carries WebReg-style detail: time range, course + part (LE/DI/LA),
+    // location, and instructor. `methods` collects codes → full names for the legend below.
+    const methods = new Map<string, string>();
     for (const ps of planned) {
       const bg = colorFor(ps.course.moduleID);
       const conflicted = conflicts.has(ps.id);
       for (const m of ps.section.meetings) {
+        if (m.method) methods.set(m.method, m.methodText || m.method);
+        const timeRange = [m.start, m.end].filter(Boolean).join(" – ");
         for (const b of meetingBlocks(m)) {
           const col = dayCols.get(b.day);
           if (!col) continue;
           const top = (b.start - START_MIN) * PX_PER_MIN;
-          const height = Math.max((b.end - b.start) * PX_PER_MIN, 14);
+          const height = Math.max((b.end - b.start) * PX_PER_MIN, 16);
+          const lines: HTMLElement[] = [
+            h("div", { class: "tsh-ev-time", text: timeRange }),
+            h("div", { class: "tsh-ev-abbr", text: `${ps.course.abbr} · ${m.method}` }),
+          ];
+          if (m.location) lines.push(h("div", { class: "tsh-ev-loc", text: m.location }));
+          if (m.instructor) lines.push(h("div", { class: "tsh-ev-inst", text: m.instructor }));
+          const title = [
+            `${ps.course.abbr} — ${m.methodText || m.method}`,
+            timeRange,
+            m.mode,
+            m.location,
+            m.instructor,
+          ]
+            .filter(Boolean)
+            .join("\n");
           const ev = h("div", {
             class: `tsh-ev${conflicted ? " tsh-ev-conflict" : ""}`,
-            title: `${ps.course.abbr} ${m.methodText || m.method}${
-              m.location ? " · " + m.location : ""
-            }`,
-          }, [
-            h("div", { class: "tsh-ev-abbr", text: `${ps.course.abbr} ${m.method}` }),
-            h("div", { class: "tsh-ev-time", text: `${m.start ?? ""}` }),
-          ]);
+            title,
+          }, lines);
           ev.style.top = `${top}px`;
           ev.style.height = `${height}px`;
           ev.style.background = bg;
@@ -145,6 +159,21 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
 
     const bodyRow = h("div", { class: "tsh-cal-body" }, [gutter, ...dayCols.values()]);
     wrap.append(h("div", { class: "tsh-cal" }, [daysRow, bodyRow]));
+
+    // Legend: which part-code means what (LE = Lecture, DI = Discussion, LA = Lab, …).
+    if (methods.size > 0) {
+      const legend = h("div", { class: "tsh-cal-legend" });
+      for (const [code, name] of methods) {
+        if (code === name) continue; // no expansion available
+        legend.append(
+          h("span", { class: "tsh-legend-item" }, [
+            h("span", { class: "tsh-legend-code", text: code }),
+            ` ${name}`,
+          ]),
+        );
+      }
+      if (legend.childNodes.length > 0) wrap.append(legend);
+    }
 
     // Removable list of planned sections.
     if (planned.length > 0) {
