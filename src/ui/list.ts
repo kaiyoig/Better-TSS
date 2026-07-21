@@ -1,6 +1,7 @@
 import type { Meeting } from "../api/types";
 import type { CourseGroup } from "../model/planOps";
 import { dropCourse, groupByCourse, parseFinal } from "../model/planOps";
+import { conflictListEl } from "./conflicts";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
 import { confirmDrop } from "./util";
@@ -93,6 +94,9 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
       );
       return;
     }
+
+    const conflictList = conflictListEl(planned);
+    if (conflictList) wrap.append(conflictList);
 
     const head = h(
       "tr",

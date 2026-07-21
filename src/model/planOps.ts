@@ -1,7 +1,7 @@
 import type { CourseSummary, Meeting } from "../api/types";
 import type { Plan, PlannedSection, PlanStore } from "./plan";
 import type { Day } from "./schedule";
-import { meetingBlocks, timeToMinutes } from "./schedule";
+import { meetingBlocks, meetingsOverlap, timeToMinutes } from "./schedule";
 
 // Shared operations over a plan's sections: grouping by course, dropping a whole course, and
 // extracting final-exam info. Used by the calendar, list, and finals views. Frozen contract —
@@ -115,6 +115,74 @@ export function datedExams(planned: PlannedSection[]): CourseExam[] {
       out.push({ course: ps.course, exam: info });
     }
   }
+  return out;
+}
+
+export interface ConflictPair {
+  a: string; // e.g. "CHEM-7L Lab"
+  b: string; // e.g. "CSE-103 Discussion"
+}
+
+/** A part label for a meeting, e.g. "CSE-103 Discussion" or "CHEM-7L Midterm". */
+function partLabel(course: CourseSummary, m: Meeting): string {
+  if (m.isFinal) return `${course.abbr} Final`;
+  if (m.days.length === 0 && /\d{1,2}\/\d{1,2}\/\d{4}/.test(m.raw)) {
+    return `${course.abbr} ${/midterm/i.test(m.raw) ? "Midterm" : "Exam"}`;
+  }
+  return `${course.abbr} ${m.methodText || m.method}`;
+}
+
+/**
+ * Every distinct pair of meetings from DIFFERENT courses that overlap in time — covering both
+ * weekly-vs-weekly overlaps and dated-exam-vs-weekly overlaps (matched on the exam's weekday).
+ * Returned as "ABBR Part" label pairs for a human-readable conflict list.
+ */
+export function conflictPairs(planned: PlannedSection[]): ConflictPair[] {
+  const out: ConflictPair[] = [];
+  const seen = new Set<string>();
+  const add = (la: string, lb: string): void => {
+    const key = [la, lb].sort().join(" || ");
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ a: la, b: lb });
+  };
+
+  const weekly: Array<{ key: string; label: string; m: Meeting }> = [];
+  for (const ps of planned) {
+    for (const m of ps.section.meetings) {
+      if (meetingBlocks(m).length > 0) {
+        weekly.push({ key: courseKey(ps.course), label: partLabel(ps.course, m), m });
+      }
+    }
+  }
+
+  // weekly vs weekly
+  for (let i = 0; i < weekly.length; i++) {
+    for (let j = i + 1; j < weekly.length; j++) {
+      if (weekly[i].key !== weekly[j].key && meetingsOverlap(weekly[i].m, weekly[j].m)) {
+        add(weekly[i].label, weekly[j].label);
+      }
+    }
+  }
+
+  // dated exam (midterm, etc.) vs weekly, matched by the exam's weekday + time
+  for (const ps of planned) {
+    for (const m of ps.section.meetings) {
+      if (m.isFinal || m.days.length > 0) continue;
+      const info = parseFinal(m);
+      const s = timeToMinutes(info.start);
+      const e = timeToMinutes(info.end);
+      if (info.day == null || s == null || e == null) continue;
+      const key = courseKey(ps.course);
+      for (const w of weekly) {
+        if (w.key === key) continue;
+        if (meetingBlocks(w.m).some((b) => b.day === info.day && s < b.end && b.start < e)) {
+          add(partLabel(ps.course, m), w.label);
+        }
+      }
+    }
+  }
+
   return out;
 }
 

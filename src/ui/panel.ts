@@ -2,6 +2,7 @@ import type { TssClient } from "../api/tss";
 import type { Term } from "../api/types";
 import type { Plan, PlanStore } from "../model/plan";
 import { CALENDAR_EXTRA_STYLES, createCalendar } from "./calendar";
+import { CONFLICT_STYLES } from "./conflicts";
 import type { AppContext, ChangeReason } from "./context";
 import { h } from "./dom";
 import { FINALS_STYLES, createFinals } from "./finals";
@@ -110,6 +111,7 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
   style.textContent = [
     STYLES,
     TAB_STYLES,
+    CONFLICT_STYLES,
     CALENDAR_EXTRA_STYLES,
     LIST_STYLES,
     FINALS_STYLES,
