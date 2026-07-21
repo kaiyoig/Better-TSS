@@ -219,13 +219,14 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
 // Injected into the shadow-root stylesheet by the integrator (see panel wiring). Only classes
 // introduced by this component live here; existing `.tsh-*` classes come from styles.ts.
 export const CALENDAR_EXTRA_STYLES = `
-/* Per-block Drop control: sits underneath the block's detail lines as a full-width button.
-   Solid white with a red border so it stands out against the colored block. On very short
-   (~50-minute) blocks it may be clipped by the block's height rather than overlapping the text. */
+/* Lay the block out as a column so the Drop button can pin to the bottom. */
+.tsh-ev { display: flex; flex-direction: column; }
+
+/* Per-block Drop control: anchored to the bottom of the block, full width, with the detail
+   lines flowing above it. Solid white with a red border so it stands out against the block. */
 .tsh-ev-drop {
-  display: block;
+  margin-top: auto;
   width: 100%;
-  margin-top: 3px;
   padding: 1px 4px;
   border: 1px solid #dc2626;
   border-radius: 4px;
