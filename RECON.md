@@ -83,10 +83,64 @@ filter dropdowns. (`AcademicPeriod='2'` = Fall Quarter in the samples.)
 ### Current enrollment — `BC_OVP_BOOKED_MODULES_SRV/ModuleSet`
 Separate OVP service; lists already-booked modules. Useful to gray out / dedupe planned courses.
 
+## Booking service — `PR_MY_MODULES_V2_SRV` (from `tss.ucsd.edu.2.har`)
+The booking **detail page** runs on a *different* service from the catalog — OData **v2**, not v4:
+```
+https://tss.ucsd.edu/sap/opu/odata/ITUS/PR_MY_MODULES_V2_SRV/
+```
+This is the "My Modules" (enrollment) side. Same session cookies; v2 CSRF/`$batch` conventions
+(writes go in a `$batch` **changeset**, or a direct POST to a creatable entity set).
+
+Section detail is read via a fully-keyed `ModuleHeaderSet` entity:
+```
+ModuleHeaderSet(SmObjid='8754',SmOtype='SM',ScObjid='00000257',
+  ModregId=guid'00000000-0000-0000-0000-000000000000',
+  EventPackageId='154425',AcademicYear='2026',AcademicSession='2')
+```
+Nav props: `/Exam /Event /Person /ModuleGroup /WebLink /IndividualWork /Information /Template`.
+Live values seen for CSE-103 (module 8754):
+`ModregId=0000…` (not booked), `SmStatus='00'` ("Waitlist Inactive"), `OnWishList=False`,
+`OpenSeats=192`, `RegistrationBeginDate=2026-07-22`, `RegistrationEndDate=2026-12-04`.
+
+### Why the Book write STILL isn't captured
+The capture was taken **2026-07-21, before `RegistrationBeginDate` (07-22)** — the window wasn't
+open, so the Book button was inert. No POST/MERGE/PUT changeset appears anywhere in this HAR.
+**Next capture:** a HAR taken *after* the window opens, clicking Book / Add-to-Waitlist.
+
+### Writable now: `WishListSet`
+Of all 31 entity sets, SAP's `sap:creatable/updatable/deletable` flags mark **only `WishListSet`
+as writable** (everything else read-only). Key = `SmObjid` (module ID). This is a server-side
+wishlist/cart we can POST to *today*, pre-registration — a real "planned, not enrolled" cart that
+persists on UCSD's servers (unlike our local `chrome.storage`). Fields incl. `Priox` (priority),
+`Credits`, `SmStatus`, `OnWishList`.
+
+### The bridge ID: `EventPackageId` == catalog `EventPkgObjid`
+Booking is keyed by numeric **`EventPackageId`** (e.g. `154425`) + `SmObjid`,`SmOtype='SM'`,`ScObjid`
+(program; `'00000000'` works for a program-agnostic read),`AcademicYear`,`AcademicSession`. That
+numeric ID is **already in the catalog `_sections` payload** as `EventPkgObjid` (`'154425'`;
+`EventPkgOtjid`/`EventPkgDisplayID` are the prefixed `'SE00154425'` form) — no extra lookup needed.
+So live status for a section is a plain credentialed GET (reads need no CSRF):
+```
+GET /sap/opu/odata/ITUS/PR_MY_MODULES_V2_SRV/ModuleHeaderSet(
+  SmObjid='<ModuleID>',SmOtype='SM',ScObjid='00000000',
+  ModregId=guid'00000000-0000-0000-0000-000000000000',
+  EventPackageId='<EventPkgObjid>',AcademicYear='<year>',AcademicSession='<period>')?sap-client=500
+Accept: application/json   →  {"d":{ OpenSeats, OpenSeatsWaitlist, SmStatusText,
+                                     RegistrationBeginDate:/Date(ms)/, ... }}
+```
+This is wired into the sections view (`TssClient.getLiveStatus`). Note `AcademicSession` is `'2'`
+here but zero-padded to `'002'` on `EventPackageSet`; v2 dates are `/Date(<epoch-ms>)/` (UTC).
+
+Other enrollment-relevant sets (all read-only here, likely populated during a booking changeset):
+`BookingCheckLogSet` (prereq/rule check results), `ActionHdrSet`/`ActionItmSet`
+(`ActionName`,`Cancel`,`ModregId`,`TemplateId` — the submit-book/cancel payload shape),
+`RequestSet` (messages).
+
 ## Gaps / next capture
-- **Booking action** — no write op (`POST`/`PUT` to book/enroll) appears in this HAR; it only
-  browses. Need a second HAR of an actual booking (or waitlist) click to map the assisted-booking
-  request. Until then, "assisted booking" = deep-link/hand off into TSS's own booking UI.
+- **Booking action** — the actual write op is still unmapped (reg window opened the day after
+  capture, 2026-07-22). Need a HAR of a real Book / waitlist / add-to-wishlist click. Until then,
+  "assisted booking" = deep-link/hand off into TSS's own booking UI. Buildable now from the above:
+  a real `WishListSet` write, and live seat/waitlist/registration-window status per section.
 - **Term codes** — confirm the full `AcademicPeriod` ↔ quarter mapping (1=?, 2=Fall, 3=?…).
 - **Rate limits / anti-automation** on repeated section polling — unknown; poll conservatively.
 
