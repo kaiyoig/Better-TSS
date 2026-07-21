@@ -1,3 +1,4 @@
+import { normalizeCourseQuery } from "../api/courseCode";
 import type { CourseSummary } from "../api/types";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
@@ -14,7 +15,7 @@ export function createSearch(
   const input = h("input", {
     class: "tsh-in tsh-search-in",
     type: "search",
-    placeholder: "Search courses (e.g. CSE 103, calculus)…",
+    placeholder: "Search courses (e.g. CHEM 7L, CSE 103, calculus)…",
   });
   const status = h("div", { class: "tsh-status" });
   const results = h("div", { class: "tsh-results" });
@@ -34,14 +35,15 @@ export function createSearch(
   }
 
   async function run(raw: string): Promise<void> {
-    const query = raw.trim();
+    // Normalize course-code-like input (e.g. "CHEM 7L" → "CHEM-007L"); titles pass through.
+    const query = normalizeCourseQuery(raw);
     const myReq = ++reqId;
     clear(results);
     if (query.length < MIN_QUERY) {
       status.textContent = "";
       return;
     }
-    status.textContent = "Searching…";
+    status.textContent = query === raw.trim() ? "Searching…" : `Searching “${query}”…`;
     try {
       const res = await ctx.client.searchCourses({ term: ctx.getTerm(), query });
       if (myReq !== reqId) return; // a newer search superseded this one
