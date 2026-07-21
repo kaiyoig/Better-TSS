@@ -126,7 +126,7 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
   }, ["📅 Planner"]);
 
   const header = h("div", { class: "tsh-header" }, [
-    h("span", { class: "tsh-title", text: "TSS Hook · Planner" }),
+    h("span", { class: "tsh-title", text: "Better TSS · Planner" }),
     h("button", {
       class: "tsh-close",
       title: "Close",

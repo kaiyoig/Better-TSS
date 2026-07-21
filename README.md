@@ -1,3 +1,3 @@
-# TSS Hook
+# Better-TSS
 
 TSS sucks. Hopefully I can fix it...

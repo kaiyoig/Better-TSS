@@ -14,6 +14,6 @@ chrome.runtime.onMessage.addListener((msg: { type?: string }) => {
   if (msg?.type === "tsshook:toggle") panel.toggle();
 });
 
-console.info("[TSS Hook] planner overlay mounted — look for the 📅 Planner button (bottom-right)");
+console.info("[Better TSS] planner overlay mounted — look for the 📅 Planner button (bottom-right)");
 
 export {};

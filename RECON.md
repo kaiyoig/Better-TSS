@@ -1,4 +1,4 @@
-# TSS Hook — Recon Findings (Phase 0)
+# Better-TSS — Recon Findings (Phase 0)
 
 Source: `tss.ucsd.edu.har` (194 requests, all on `tss.ucsd.edu`), captured while browsing the
 Schedule of Classes in the TSS Fiori UI. TSS is SAP Student Lifecycle Management fronted by

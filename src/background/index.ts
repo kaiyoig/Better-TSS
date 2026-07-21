@@ -1,7 +1,7 @@
 // Service worker. Placeholder for Phase 2+ (saved-plan storage lives in the content script's
 // chrome.storage; cross-tab messaging can grow here later).
 chrome.runtime.onInstalled.addListener(() => {
-  console.info("[TSS Hook] installed");
+  console.info("[Better TSS] installed");
 });
 
 // The toolbar icon toggles the on-page planner. If the active tab isn't a TSS page (no content

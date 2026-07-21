@@ -1,5 +1,5 @@
 {
-  "name": "tss-hook",
+  "name": "better-tss",
   "version": "0.1.0",
   "description": "Bring WebReg-style schedule planning back to UCSD's Triton Student System (TSS).",
   "private": true,
