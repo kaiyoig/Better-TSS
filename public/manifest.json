@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "TSS Hook",
+  "version": "0.1.0",
+  "description": "WebReg-style schedule planning on top of UCSD's Triton Student System.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://tss.ucsd.edu/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://tss.ucsd.edu/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "TSS Hook"
+  }
+}

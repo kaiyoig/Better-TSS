@@ -1,0 +1,18 @@
+{
+  "name": "tss-hook",
+  "version": "0.1.0",
+  "description": "Bring WebReg-style schedule planning back to UCSD's Triton Student System (TSS).",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.268",
+    "@types/node": "^22.20.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0"
+  }
+}
