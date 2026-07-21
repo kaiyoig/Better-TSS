@@ -3,6 +3,7 @@ import type { CourseGroup } from "../model/planOps";
 import { dropCourse, groupByCourse, parseFinal } from "../model/planOps";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
+import { confirmDrop } from "./util";
 
 // WebReg-style "List" view: a table where each course spans several rows (one per meeting part —
 // LE / DI / LA — plus a Final Exam row). The merged left/right cells (course, title, units,
@@ -98,7 +99,9 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
         text: "Drop",
         onClick: () => {
           const planId = ctx.getActivePlanId();
-          if (planId) void dropCourse(ctx.store, planId, group.key);
+          if (planId && confirmDrop(group.course.abbr)) {
+            void dropCourse(ctx.store, planId, group.key);
+          }
         },
       });
 

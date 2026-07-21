@@ -184,6 +184,13 @@ export const STYLES = `
   padding: 8px 10px;
 }
 .tsh-sec-added { border-color: #86efac; background: #f0fdf4; }
+.tsh-sec-conflicted { border-color: #fca5a5; background: #fff7f7; }
+.tsh-sec-conflict {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b91c1c;
+}
 .tsh-sec-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tsh-sec-name { font-weight: 600; flex: 1 1 auto; }
 .tsh-seats { font-size: 11px; color: #475569; }

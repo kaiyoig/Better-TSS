@@ -1,6 +1,8 @@
 import type { CourseSummary, Meeting, Section } from "../api/types";
+import { courseKey } from "../model/planOps";
 import type { Plan } from "../model/plan";
 import { plannedSectionId } from "../model/plan";
+import { sectionsConflict } from "../model/schedule";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
 import { errorMessage } from "./util";
@@ -64,6 +66,19 @@ export function createSections(ctx: AppContext): {
   function sectionCard(c: CourseSummary, sec: Section, plan: Plan | null): HTMLElement {
     const id = plannedSectionId(c, sec);
     const already = (plan?.sections ?? []).some((s) => s.id === id);
+
+    // Which already-planned courses (other than this one) does this section clash with?
+    const key = courseKey(c);
+    const conflictAbbrs = [
+      ...new Set(
+        (plan?.sections ?? [])
+          .filter(
+            (ps) => courseKey(ps.course) !== key && sectionsConflict(sec, ps.section),
+          )
+          .map((ps) => ps.course.abbr),
+      ),
+    ];
+
     const addBtn = h("button", {
       class: "tsh-btn tsh-add",
       text: already ? "Added" : "Add to plan",
@@ -85,10 +100,21 @@ export function createSections(ctx: AppContext): {
     }
     top.push(addBtn);
 
-    return h("div", { class: `tsh-sec${already ? " tsh-sec-added" : ""}` }, [
-      h("div", { class: "tsh-sec-top" }, top),
-      h("div", { class: "tsh-meetings" }, sec.meetings.map(meetingLine)),
-    ]);
+    const children: HTMLElement[] = [h("div", { class: "tsh-sec-top" }, top)];
+    if (conflictAbbrs.length > 0) {
+      children.push(
+        h("div", {
+          class: "tsh-sec-conflict",
+          text: `⚠ Time conflict with ${conflictAbbrs.join(", ")}`,
+        }),
+      );
+    }
+    children.push(h("div", { class: "tsh-meetings" }, sec.meetings.map(meetingLine)));
+
+    const cls = `tsh-sec${already ? " tsh-sec-added" : ""}${
+      conflictAbbrs.length > 0 ? " tsh-sec-conflicted" : ""
+    }`;
+    return h("div", { class: cls }, children);
   }
 
   function render(): void {

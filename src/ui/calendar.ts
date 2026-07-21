@@ -9,6 +9,7 @@ import {
 import { courseKey, dropCourse, groupByCourse } from "../model/planOps";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
+import { confirmDrop } from "./util";
 
 const START_MIN = 8 * 60; // 8:00 AM
 const END_MIN = 22 * 60; // 10:00 PM
@@ -151,7 +152,9 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
               onClick: (event) => {
                 event.stopPropagation();
                 const planId = ctx.getActivePlanId();
-                if (planId) void dropCourse(ctx.store, planId, courseKey(ps.course));
+                if (planId && confirmDrop(ps.course.abbr)) {
+                  void dropCourse(ctx.store, planId, courseKey(ps.course));
+                }
               },
             }),
           );
@@ -192,7 +195,9 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
           title: `Drop ${group.course.abbr} (all sections)`,
           onClick: () => {
             const planId = ctx.getActivePlanId();
-            if (planId) void dropCourse(ctx.store, planId, group.key);
+            if (planId && confirmDrop(group.course.abbr)) {
+              void dropCourse(ctx.store, planId, group.key);
+            }
           },
         });
         list.append(

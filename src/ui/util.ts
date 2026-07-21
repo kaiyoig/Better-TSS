@@ -6,3 +6,8 @@ export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return "Something went wrong. Are you logged in to TSS?";
 }
+
+/** Confirm a course drop before it happens. Returns true if the user accepts. */
+export function confirmDrop(courseLabel: string): boolean {
+  return window.confirm(`Drop ${courseLabel} from your schedule?`);
+}
