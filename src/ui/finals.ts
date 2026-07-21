@@ -13,7 +13,7 @@ import { clear, h } from "./dom";
 
 const START_MIN = 8 * 60; // 8:00 AM
 const END_MIN = 22 * 60; // 10:00 PM
-const PX_PER_MIN = 64 / 60; // one hour ≈ 64px — matches the calendar view
+const PX_PER_MIN = 96 / 60; // one hour ≈ 96px — matches the calendar view
 const BODY_HEIGHT = (END_MIN - START_MIN) * PX_PER_MIN;
 
 // Finals week is typically Mon–Sat.

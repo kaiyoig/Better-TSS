@@ -12,7 +12,7 @@ import { clear, h } from "./dom";
 
 const START_MIN = 8 * 60; // 8:00 AM
 const END_MIN = 22 * 60; // 10:00 PM
-const PX_PER_MIN = 64 / 60; // one hour ≈ 64px — tall enough to fit method/location/instructor
+const PX_PER_MIN = 96 / 60; // one hour ≈ 96px — a 50-min block fits all detail lines + Drop
 const BODY_HEIGHT = (END_MIN - START_MIN) * PX_PER_MIN;
 
 const BASE_DAYS = new Set<Day>(["M", "Tu", "W", "Th", "F"]);

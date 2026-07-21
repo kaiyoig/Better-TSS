@@ -35,7 +35,7 @@ export const STYLES = `
   top: 0;
   right: 0;
   z-index: 2147483001;
-  width: min(1280px, 96vw);
+  width: 100vw;
   max-width: 100vw;
   height: 100vh;
   background: #f4f6fb;
