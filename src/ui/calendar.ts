@@ -125,6 +125,8 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
       for (const m of ps.section.meetings) {
         if (m.method) methods.set(m.method, m.methodText || m.method);
         const timeRange = [m.start, m.end].filter(Boolean).join(" – ");
+        // WebReg-style: part code and location on one line, e.g. "LE / Pepper Canyon Hall 106".
+        const methodLoc = [m.method, m.location].filter(Boolean).join(" / ");
         for (const b of meetingBlocks(m)) {
           const col = dayCols.get(b.day);
           if (!col) continue;
@@ -132,22 +134,12 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
           const height = Math.max((b.end - b.start) * PX_PER_MIN, 16);
           const lines: HTMLElement[] = [
             h("div", { class: "tsh-ev-time", text: timeRange }),
-            h("div", { class: "tsh-ev-abbr", text: `${ps.course.abbr} · ${m.method}` }),
+            h("div", { class: "tsh-ev-abbr", text: ps.course.abbr }),
           ];
-          if (m.location) lines.push(h("div", { class: "tsh-ev-loc", text: m.location }));
+          if (methodLoc) lines.push(h("div", { class: "tsh-ev-loc", text: methodLoc }));
           if (m.instructor) lines.push(h("div", { class: "tsh-ev-inst", text: m.instructor }));
-          const title = [
-            `${ps.course.abbr} — ${m.methodText || m.method}`,
-            timeRange,
-            m.mode,
-            m.location,
-            m.instructor,
-          ]
-            .filter(Boolean)
-            .join("\n");
           const ev = h("div", {
             class: `tsh-ev${conflicted ? " tsh-ev-conflict" : ""}`,
-            title,
           }, lines);
           ev.style.top = `${top}px`;
           ev.style.height = `${height}px`;
