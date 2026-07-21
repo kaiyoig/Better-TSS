@@ -16,8 +16,9 @@ const END_MIN = 22 * 60; // 10:00 PM
 const PX_PER_MIN = 96 / 60; // one hour ≈ 96px — matches the calendar view
 const BODY_HEIGHT = (END_MIN - START_MIN) * PX_PER_MIN;
 
-// Finals week is typically Mon–Sat.
-const FINALS_DAYS: Day[] = ["M", "Tu", "W", "Th", "F", "Sa"];
+// UCSD finals week runs Saturday through the following Friday — show the whole week by default,
+// ordered starting Saturday, regardless of which days actually have an exam.
+const FINALS_DAYS: Day[] = ["Sa", "Su", "M", "Tu", "W", "Th", "F"];
 const DAY_LABEL: Record<Day, string> = {
   Su: "Sun",
   M: "Mon",
@@ -139,12 +140,10 @@ export function createFinals(ctx: AppContext): { el: HTMLElement } {
       return;
     }
 
-    // Which day columns to show: any finals-week day that actually has a scheduled exam.
-    const present = new Set<Day>();
-    for (const p of placed) present.add(p.day);
-    const days = FINALS_DAYS.filter((d) => present.has(d));
+    // Show the entire finals week (Sat–Fri) by default, not just days with a scheduled exam.
+    const days = FINALS_DAYS;
 
-    // Only draw the grid when there's at least one placeable final.
+    // Always draw the full-week grid when the plan has any finals.
     if (days.length > 0) {
       // Header row.
       const daysRow = h("div", { class: "tsh-cal-daysrow" }, [
