@@ -106,13 +106,16 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
     sections.el.scrollIntoView({ behavior: "smooth", block: "nearest" });
   });
 
-  const content = h("div", { class: "tsh-content" }, [
+  // Two columns on wide screens: browse controls on the left, the calendar (which benefits most
+  // from width) on the right. Collapses to a single stacked column on narrow screens via CSS.
+  const leftCol = h("div", { class: "tsh-col tsh-col-left" }, [
     termSelector.el,
     plansSwitcher.el,
     search.el,
     sections.el,
-    calendar.el,
   ]);
+  const rightCol = h("div", { class: "tsh-col tsh-col-right" }, [calendar.el]);
+  const content = h("div", { class: "tsh-content" }, [leftCol, rightCol]);
 
   const drawer = h("div", { class: "tsh-drawer" }, [header, content]);
   wrap.append(toggle, drawer);

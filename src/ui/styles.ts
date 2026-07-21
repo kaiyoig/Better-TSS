@@ -35,7 +35,7 @@ export const STYLES = `
   top: 0;
   right: 0;
   z-index: 2147483001;
-  width: 540px;
+  width: min(1280px, 96vw);
   max-width: 100vw;
   height: 100vh;
   background: #f4f6fb;
@@ -71,10 +71,25 @@ export const STYLES = `
 .tsh-content {
   flex: 1 1 auto;
   overflow-y: auto;
-  padding: 14px 16px 40px;
+  padding: 16px 20px 40px;
+  display: grid;
+  grid-template-columns: minmax(380px, 460px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.tsh-col {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
+}
+/* Keep the calendar in view while scrolling the browse column on tall lists. */
+.tsh-col-right { position: sticky; top: 0; }
+
+/* Collapse to a single stacked column when the drawer is narrow. */
+@media (max-width: 900px) {
+  .tsh-content { grid-template-columns: 1fr; }
+  .tsh-col-right { position: static; }
 }
 
 .tsh-label {
