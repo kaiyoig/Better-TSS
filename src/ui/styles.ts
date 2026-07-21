@@ -128,6 +128,8 @@ export const STYLES = `
 .tsh-btn-danger:hover:not(:disabled) { background: #fef2f2; border-color: #fca5a5; color: #b91c1c; }
 .tsh-add { background: #1d4ed8; color: #fff; border-color: #1d4ed8; }
 .tsh-add:hover:not(:disabled) { background: #1e40af; color: #fff; }
+.tsh-switch { background: #fff; color: #1d4ed8; border-color: #93c5fd; font-weight: 600; }
+.tsh-switch:hover:not(:disabled) { background: #eff6ff; border-color: #60a5fa; }
 
 /* Term selector */
 .tsh-term-presets { width: 100%; margin-bottom: 8px; }
@@ -191,10 +193,38 @@ export const STYLES = `
   font-weight: 600;
   color: #b91c1c;
 }
+.tsh-sec-note {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #64748b;
+  font-style: italic;
+}
 .tsh-sec-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tsh-sec-name { font-weight: 600; flex: 1 1 auto; }
 .tsh-seats { font-size: 11px; color: #475569; }
 .tsh-wl { font-size: 11px; color: #b45309; }
+
+/* Live enrollment status (booking service) */
+.tsh-live {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 11px;
+}
+.tsh-live-pending { color: #94a3b8; font-style: italic; }
+.tsh-live-seats { font-weight: 600; color: #334155; }
+.tsh-live-window {
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.tsh-live-open { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+.tsh-live-soon { background: #fef9c3; color: #854d0e; border-color: #fde68a; }
+.tsh-live-closed { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
+.tsh-live-wish { color: #7c3aed; font-weight: 600; }
 .tsh-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
 .tsh-dot-green { background: #16a34a; }
 .tsh-dot-yellow { background: #eab308; }
@@ -205,6 +235,7 @@ export const STYLES = `
 .tsh-m-method { font-weight: 600; color: #334155; }
 .tsh-m-final { color: #7c3aed; }
 .tsh-m-exam { color: #7c3aed; }
+.tsh-m-tba { color: #b45309; font-weight: 600; }
 
 /* Calendar */
 .tsh-cal-wrap { display: flex; flex-direction: column; gap: 8px; }

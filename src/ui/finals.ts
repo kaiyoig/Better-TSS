@@ -2,9 +2,10 @@ import type { CourseSummary } from "../api/types";
 import type { Day } from "../model/schedule";
 import { timeToMinutes } from "../model/schedule";
 import type { CourseFinal } from "../model/planOps";
-import { finalMeetings } from "../model/planOps";
+import { courseKey, dropCourse, finalMeetings } from "../model/planOps";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
+import { confirmDrop } from "./util";
 
 // Weekly grid of final exams for finals week. Structurally mirrors `calendar.ts` (same time
 // window, px-per-minute, gutter + one column per weekday) but plots only final-exam meetings.
@@ -204,6 +205,48 @@ export function createFinals(ctx: AppContext): { el: HTMLElement } {
 
       const bodyRow = h("div", { class: "tsh-cal-body" }, [gutter, ...dayCols.values()]);
       wrap.append(h("div", { class: "tsh-cal" }, [daysRow, bodyRow]));
+    }
+
+    // Manage courses that have a final: Switch to a different section, or Drop the course. One row
+    // per course (deduped). Reuses the `.tsh-planned*` / `.tsh-course-*` classes from calendar.ts.
+    const managed: CourseSummary[] = [];
+    const managedSeen = new Set<string>();
+    for (const item of finals) {
+      const key = courseKey(item.course);
+      if (managedSeen.has(key)) continue;
+      managedSeen.add(key);
+      managed.push(item.course);
+    }
+    if (managed.length > 0) {
+      const list = h("div", { class: "tsh-planned" });
+      for (const course of managed) {
+        const switchBtn = h("button", {
+          class: "tsh-course-switch",
+          text: "Switch",
+          title: `Pick a different section of ${course.abbr}`,
+          onClick: () => ctx.showSections(course),
+        });
+        const drop = h("button", {
+          class: "tsh-course-drop",
+          text: "Drop",
+          title: `Drop ${course.abbr} (all sections)`,
+          onClick: () => {
+            const planId = ctx.getActivePlanId();
+            if (planId && confirmDrop(course.abbr)) {
+              void dropCourse(ctx.store, planId, courseKey(course));
+            }
+          },
+        });
+        list.append(
+          h("div", { class: "tsh-planned-row" }, [
+            h("span", { class: "tsh-planned-abbr", text: course.abbr }),
+            h("span", { class: "tsh-planned-name", text: course.title }),
+            switchBtn,
+            drop,
+          ]),
+        );
+      }
+      wrap.append(list);
     }
 
     // Unscheduled / TBA finals (no parseable weekday or time) — listed, never dropped silently.

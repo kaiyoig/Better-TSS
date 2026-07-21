@@ -1,6 +1,6 @@
 import type { Meeting } from "../api/types";
 import type { CourseGroup } from "../model/planOps";
-import { dropCourse, groupByCourse, parseFinal } from "../model/planOps";
+import { dropCourse, groupByCourse, isUnscheduled, parseFinal } from "../model/planOps";
 import { conflictListEl } from "./conflicts";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
@@ -67,11 +67,16 @@ function meetingCells(m: Meeting): HTMLElement[] {
       h("td", { class: "tsh-list-loc", text: m.location ?? "" }),
     ];
   }
+  // A weekly part with no set time yet (e.g. an unscheduled lab): show "TBA", not a blank cell.
+  const tba = isUnscheduled(m);
   return [
     h("td", { class: "tsh-list-type", text: m.method }),
     h("td", { class: "tsh-list-inst", text: m.instructor ?? "" }),
-    h("td", { class: "tsh-list-days", text: m.days.join("") }),
-    h("td", { class: "tsh-list-time", text: timeRange(m.start, m.end) || "—" }),
+    h("td", { class: "tsh-list-days", text: tba ? "TBA" : m.days.join("") }),
+    h("td", {
+      class: `tsh-list-time${tba ? " tsh-list-tba" : ""}`,
+      text: tba ? "TBA" : timeRange(m.start, m.end) || "—",
+    }),
     h("td", { class: "tsh-list-loc", text: m.location ?? "" }),
   ];
 }
@@ -109,6 +114,12 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
       const meetings = orderMeetings(group);
       const span = Math.max(meetings.length, 1);
 
+      const switchBtn = h("button", {
+        class: "tsh-btn tsh-list-switch",
+        text: "Switch",
+        title: `Pick a different section of ${group.course.abbr}`,
+        onClick: () => ctx.showSections(group.course),
+      });
       const dropBtn = h("button", {
         class: "tsh-btn tsh-btn-danger tsh-list-drop",
         text: "Drop",
@@ -155,7 +166,10 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
               text: "Planned",
               attrs: { rowspan: String(span) },
             }),
-            h("td", { class: "tsh-list-action", attrs: { rowspan: String(span) } }, [dropBtn]),
+            h("td", { class: "tsh-list-action", attrs: { rowspan: String(span) } }, [
+              switchBtn,
+              dropBtn,
+            ]),
           );
         }
         body.append(tr);
@@ -227,8 +241,16 @@ export const LIST_STYLES = `
   color: #2a7a3b;
   font-weight: 600;
 }
+.tsh-list-tba {
+  color: #b45309;
+  font-weight: 600;
+}
 .tsh-list-action {
   text-align: center;
+  white-space: nowrap;
+}
+.tsh-list-switch {
+  margin-right: 6px;
 }
 .tsh-list-drop {
   white-space: nowrap;

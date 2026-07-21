@@ -1,6 +1,7 @@
 import type { CourseSummary, Section } from "../api/types";
 import type { Plan, PlannedSection, PlanStore } from "../model/plan";
 import { plannedSectionId } from "../model/plan";
+import { courseKey } from "../model/planOps";
 
 const PLANS_KEY = "tsshook:plans";
 const ACTIVE_KEY = "tsshook:activePlanId";
@@ -107,7 +108,11 @@ export function createPlanStore(): PlanStore {
       const plans = await readPlans();
       const plan = requirePlan(plans, planId);
       const id = plannedSectionId(course, section);
-      if (!plan.sections.some((s) => s.id === id)) {
+      // One section per course: if a (possibly different) section of this course is already
+      // planned, leave the plan untouched. The UI disables Add in this case; this is the guard.
+      const key = courseKey(course);
+      const hasCourse = plan.sections.some((s) => courseKey(s.course) === key);
+      if (!hasCourse) {
         const planned: PlannedSection = {
           id,
           course,

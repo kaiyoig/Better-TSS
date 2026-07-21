@@ -8,6 +8,7 @@ import {
   dropCourse,
   examConflicts,
   groupByCourse,
+  isUnscheduled,
 } from "../model/planOps";
 import { conflictListEl } from "./conflicts";
 import type { AppContext } from "./context";
@@ -166,6 +167,30 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
       wrap.append(notes);
     }
 
+    // Weekly parts with no set time yet (e.g. an unscheduled lab) can't be placed on the grid.
+    // Surface them as a note so they aren't silently missing, mirroring how TSS shows "TBA".
+    const tbaItems: Array<{ abbr: string; m: Meeting }> = [];
+    for (const ps of planned) {
+      for (const m of ps.section.meetings) {
+        if (isUnscheduled(m)) tbaItems.push({ abbr: ps.course.abbr, m });
+      }
+    }
+    if (tbaItems.length > 0) {
+      const notes = h("div", { class: "tsh-cal-notes" }, [
+        h("div", { class: "tsh-cal-notes-title", text: "Not yet scheduled (TBA)" }),
+      ]);
+      for (const { abbr, m } of tbaItems) {
+        const detail = [m.methodText || m.method, "Time TBA", m.location].filter(Boolean).join(" · ");
+        notes.append(
+          h("div", { class: "tsh-cal-note" }, [
+            h("span", { class: "tsh-cal-note-abbr", text: abbr }),
+            ` ${detail}`,
+          ]),
+        );
+      }
+      wrap.append(notes);
+    }
+
     // Which day columns to show: Mon–Fri always, plus any weekend day with a block.
     const present = new Set<Day>();
     for (const ps of planned) for (const b of sectionBlocks(ps.section)) present.add(b.day);
@@ -264,20 +289,31 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
         const ev = h("div", {
           class: `tsh-ev${blk.conflicted ? " tsh-ev-conflict" : ""}`,
         }, lines);
-        // Drop control: dropping one part drops the whole course.
+        // Switch / Drop controls, pinned to the block's bottom. Both act on the whole course.
         ev.append(
-          h("button", {
-            class: "tsh-ev-drop",
-            text: "Drop",
-            title: `Drop ${ps.course.abbr}`,
-            onClick: (event) => {
-              event.stopPropagation();
-              const planId = ctx.getActivePlanId();
-              if (planId && confirmDrop(ps.course.abbr)) {
-                void dropCourse(ctx.store, planId, courseKey(ps.course));
-              }
-            },
-          }),
+          h("div", { class: "tsh-ev-actions" }, [
+            h("button", {
+              class: "tsh-ev-switch",
+              text: "Switch",
+              title: `Switch section of ${ps.course.abbr}`,
+              onClick: (event) => {
+                event.stopPropagation();
+                ctx.showSections(ps.course);
+              },
+            }),
+            h("button", {
+              class: "tsh-ev-drop",
+              text: "Drop",
+              title: `Drop ${ps.course.abbr}`,
+              onClick: (event) => {
+                event.stopPropagation();
+                const planId = ctx.getActivePlanId();
+                if (planId && confirmDrop(ps.course.abbr)) {
+                  void dropCourse(ctx.store, planId, courseKey(ps.course));
+                }
+              },
+            }),
+          ]),
         );
         const widthPct = 100 / blk.lanes;
         const leftPct = blk.lane * widthPct;
@@ -314,6 +350,12 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
       const list = h("div", { class: "tsh-planned" });
       for (const group of groupByCourse(planned)) {
         const conflicted = conflictedCourseKeys.has(group.key);
+        const switchBtn = h("button", {
+          class: "tsh-course-switch",
+          text: "Switch",
+          title: `Pick a different section of ${group.course.abbr}`,
+          onClick: () => ctx.showSections(group.course),
+        });
         const drop = h("button", {
           class: "tsh-course-drop",
           text: "Drop",
@@ -330,6 +372,7 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
             h("span", { class: "tsh-planned-abbr", text: group.course.abbr }),
             h("span", { class: "tsh-planned-name", text: group.course.title }),
             h("span", { class: "tsh-planned-units", text: `${group.course.units}u` }),
+            switchBtn,
             drop,
           ]),
         );
@@ -352,16 +395,20 @@ export const CALENDAR_EXTRA_STYLES = `
 /* Lay the block out as a column so the Drop button can pin to the bottom. */
 .tsh-ev { display: flex; flex-direction: column; }
 
-/* Per-block Drop control: anchored to the bottom of the block, full width, with the detail
-   lines flowing above it. Solid white with a red border so it stands out against the block. */
-.tsh-ev-drop {
+/* Per-block Switch / Drop controls: anchored to the bottom of the block, side by side, with the
+   detail lines flowing above them. Solid white with colored borders so they read against the block. */
+.tsh-ev-actions {
   margin-top: auto;
-  width: 100%;
+  display: flex;
+  gap: 3px;
+}
+.tsh-ev-switch,
+.tsh-ev-drop {
+  flex: 1 1 0;
+  min-width: 0;
   padding: 1px 4px;
-  border: 1px solid #dc2626;
   border-radius: 4px;
   background: #fff;
-  color: #b91c1c;
   font: inherit;
   font-size: 9px;
   font-weight: 700;
@@ -369,6 +416,9 @@ export const CALENDAR_EXTRA_STYLES = `
   cursor: pointer;
   box-sizing: border-box;
 }
+.tsh-ev-switch { border: 1px solid #2563eb; color: #1d4ed8; }
+.tsh-ev-switch:hover { background: #eff6ff; }
+.tsh-ev-drop { border: 1px solid #dc2626; color: #b91c1c; }
 .tsh-ev-drop:hover { background: #fef2f2; }
 
 /* Dated-exam notes above the grid (midterms, etc.). */
@@ -393,19 +443,25 @@ export const CALENDAR_EXTRA_STYLES = `
 .tsh-cal-note-conflict { color: #b91c1c; }
 .tsh-cal-note-warn { font-size: 11px; font-weight: 600; color: #b91c1c; }
 
-/* Per-course Drop button in the list beneath the grid. */
+/* Per-course Switch / Drop buttons in the list beneath the grid. */
+.tsh-course-switch,
 .tsh-course-drop {
   flex: 0 0 auto;
   padding: 2px 8px;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   background: #fff;
-  color: #b91c1c;
   font: inherit;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
+.tsh-course-switch { color: #1d4ed8; }
+.tsh-course-switch:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+.tsh-course-drop { color: #b91c1c; }
 .tsh-course-drop:hover {
   background: #fef2f2;
   border-color: #fca5a5;

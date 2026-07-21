@@ -43,11 +43,28 @@ export interface Meeting {
 
 export interface Section {
   eventPkgText: string; // "CSE-103 (P-001-001)"
+  /** EventPkgObjid, e.g. "154425" — the numeric EventPackageId the booking service is keyed by. */
+  pkgObjid: string;
   limit: number;
   seatsAvailable: number;
   waitlist: number;
   capacity: CapacityColor;
   meetings: Meeting[];
+}
+
+/**
+ * Real-time enrollment status for one section, read from the booking service
+ * (`PR_MY_MODULES_V2_SRV`, see RECON.md). Distinct from the catalog snapshot on `Section`: it
+ * carries the registration window and live waitlist detail the catalog doesn't expose.
+ */
+export interface LiveStatus {
+  openSeats: number;
+  openSeatsWaitlist: number;
+  statusText: string; // SmStatusText, e.g. "Waitlist Inactive"
+  waitlistBooking: boolean;
+  onWishList: boolean;
+  registrationBegin: Date | null;
+  registrationEnd: Date | null;
 }
 
 export interface CourseDetail extends CourseSummary {

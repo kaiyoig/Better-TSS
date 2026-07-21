@@ -1,5 +1,5 @@
-import type { CourseSummary, Meeting, Section } from "../api/types";
-import { courseKey } from "../model/planOps";
+import type { CourseSummary, LiveStatus, Meeting, Section } from "../api/types";
+import { courseKey, isUnscheduled } from "../model/planOps";
 import type { Plan } from "../model/plan";
 import { plannedSectionId } from "../model/plan";
 import { meetingsOverlap } from "../model/schedule";
@@ -9,6 +9,23 @@ import { errorMessage } from "./util";
 
 // A calendar date (MM/DD/YYYY) marks a one-off event (exam), not a weekly meeting.
 const DATED_RE = /\d{1,2}\/\d{1,2}\/\d{4}/;
+
+/** Sentinel stored in the live-status cache when the booking service call failed for a section. */
+const LIVE_ERROR = Symbol("live-error");
+type LiveEntry = LiveStatus | typeof LIVE_ERROR;
+
+/**
+ * Format a registration-window boundary. OData v2 emits these as UTC-midnight date values, so we
+ * render in UTC and only show a time when it isn't midnight (avoids a spurious timezone-shifted time).
+ */
+function fmtWindow(d: Date): string {
+  const opts: Intl.DateTimeFormatOptions = { timeZone: "UTC", month: "short", day: "numeric" };
+  if (d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0) {
+    opts.hour = "numeric";
+    opts.minute = "2-digit";
+  }
+  return d.toLocaleString(undefined, opts);
+}
 
 /** Section browser for a chosen course: seats, capacity, meetings, and an Add-to-plan action. */
 export function createSections(ctx: AppContext): {
@@ -25,12 +42,16 @@ export function createSections(ctx: AppContext): {
   let sections: Section[] | null = null;
   let loading = false;
   let error: string | null = null;
+  // Live enrollment status per section, keyed by pkgObjid. Undefined = still loading; the LIVE_ERROR
+  // sentinel = the booking-service call failed (we fall back silently to the catalog snapshot).
+  const live = new Map<string, LiveEntry>();
 
   function load(next: CourseSummary): void {
     course = next;
     sections = null;
     error = null;
     loading = true;
+    live.clear();
     render();
     const target = next;
     ctx.client
@@ -40,6 +61,7 @@ export function createSections(ctx: AppContext): {
         sections = secs;
         loading = false;
         render();
+        loadLive(target, secs);
       })
       .catch((err: unknown) => {
         if (course !== target) return;
@@ -47,6 +69,63 @@ export function createSections(ctx: AppContext): {
         error = errorMessage(err);
         render();
       });
+  }
+
+  // Progressive enhancement: sections render immediately from the catalog, then each section's live
+  // status streams in from the booking service and patches its card. Failures fall back silently.
+  function loadLive(target: CourseSummary, secs: Section[]): void {
+    for (const sec of secs) {
+      if (!sec.pkgObjid) continue;
+      ctx.client
+        .getLiveStatus(target, sec)
+        .then((st) => {
+          if (course !== target) return;
+          live.set(sec.pkgObjid, st);
+          render();
+        })
+        .catch(() => {
+          if (course !== target) return;
+          live.set(sec.pkgObjid, LIVE_ERROR);
+          render();
+        });
+    }
+  }
+
+  // The live line: real-time open seats/waitlist plus the enrollment window the catalog can't show.
+  function liveLine(sec: Section): HTMLElement | null {
+    if (!sec.pkgObjid) return null;
+    const entry = live.get(sec.pkgObjid);
+    if (entry === undefined) {
+      return h("div", { class: "tsh-live tsh-live-pending", text: "Checking live status…" });
+    }
+    if (entry === LIVE_ERROR) return null; // catalog seats already shown above
+
+    const st = entry;
+    const now = new Date();
+    let windowText: string;
+    let windowClass: string;
+    if (st.registrationBegin && now < st.registrationBegin) {
+      windowText = `Enrollment opens ${fmtWindow(st.registrationBegin)}`;
+      windowClass = "tsh-live-soon";
+    } else if (st.registrationEnd && now > st.registrationEnd) {
+      windowText = "Enrollment closed";
+      windowClass = "tsh-live-closed";
+    } else {
+      windowText = st.registrationEnd
+        ? `Enrollment open · closes ${fmtWindow(st.registrationEnd)}`
+        : "Enrollment open";
+      windowClass = "tsh-live-open";
+    }
+
+    const seatText =
+      `${st.openSeats} open` +
+      (st.openSeatsWaitlist > 0 ? ` · WL ${st.openSeatsWaitlist} open` : "");
+    const bits: HTMLElement[] = [
+      h("span", { class: "tsh-live-seats", text: seatText }),
+      h("span", { class: `tsh-live-window ${windowClass}`, text: windowText }),
+    ];
+    if (st.onWishList) bits.push(h("span", { class: "tsh-live-wish", text: "On TSS wishlist" }));
+    return h("div", { class: "tsh-live" }, bits);
   }
 
   function meetingLine(m: Meeting): HTMLElement {
@@ -58,21 +137,37 @@ export function createSections(ctx: AppContext): {
     const bits: Array<Node | string> = [
       h("span", { class: "tsh-m-method", text: m.methodText || m.method }),
     ];
-    const when = [m.days.join(""), [m.start, m.end].filter(Boolean).join("–")]
-      .filter(Boolean)
-      .join(" ");
-    const extra = [when, m.mode, m.location, m.instructor].filter(Boolean).join(" · ");
-    if (extra) bits.push(" · " + extra);
+    const timeStr = [m.start, m.end].filter(Boolean).join("–");
+    if (!timeStr && isUnscheduled(m)) {
+      // No set time yet (e.g. an unscheduled lab). Say so explicitly, like TSS does.
+      bits.push(" · ");
+      bits.push(
+        h("span", {
+          class: "tsh-m-tba",
+          text: m.days.length ? `${m.days.join("")} · Time TBA` : "Time TBA",
+        }),
+      );
+      const rest = [m.mode, m.location, m.instructor].filter(Boolean).join(" · ");
+      if (rest) bits.push(" · " + rest);
+    } else {
+      const when = [m.days.join(""), timeStr].filter(Boolean).join(" ");
+      const extra = [when, m.mode, m.location, m.instructor].filter(Boolean).join(" · ");
+      if (extra) bits.push(" · " + extra);
+    }
     return h("div", { class: "tsh-m" }, bits);
   }
 
   function sectionCard(c: CourseSummary, sec: Section, plan: Plan | null): HTMLElement {
     const id = plannedSectionId(c, sec);
-    const already = (plan?.sections ?? []).some((s) => s.id === id);
+    const planned = plan?.sections ?? [];
+    const already = planned.some((s) => s.id === id);
+    const key = courseKey(c);
+    // Only one section of a course may be planned at a time. If a *different* section of this same
+    // course is already in the plan, block adding this one (drop the other first to switch).
+    const otherOfCourse = already ? undefined : planned.find((s) => courseKey(s.course) === key);
 
     // Which specific parts of other planned courses does this section clash with? Report the
     // exact part, e.g. "CSE-103 Discussion" — comparing meeting-by-meeting, skipping this course.
-    const key = courseKey(c);
     const conflictParts: string[] = [];
     const seen = new Set<string>();
     for (const ps of plan?.sections ?? []) {
@@ -88,13 +183,27 @@ export function createSections(ctx: AppContext): {
     }
 
     const addBtn = h("button", {
-      class: "tsh-btn tsh-add",
-      text: already ? "Added" : "Add to plan",
+      class: `tsh-btn ${otherOfCourse ? "tsh-switch" : "tsh-add"}`,
+      text: already ? "Added" : otherOfCourse ? "Switch to this" : "Add to plan",
       disabled: !plan || already,
-      title: plan ? undefined : "Create or select a plan first",
+      title: !plan
+        ? "Create or select a plan first"
+        : otherOfCourse
+          ? `Replace ${otherOfCourse.section.eventPkgText} with this section`
+          : undefined,
       onClick: () => {
         const planId = ctx.getActivePlanId();
-        if (planId) void ctx.store.addSection(planId, c, sec);
+        if (!planId) return;
+        if (otherOfCourse) {
+          // Switch sections: drop the currently-planned one, then add this. Sequential so the
+          // one-section-per-course guard in addSection sees the course already cleared.
+          void (async () => {
+            await ctx.store.removeSection(planId, otherOfCourse.id);
+            await ctx.store.addSection(planId, c, sec);
+          })();
+        } else {
+          void ctx.store.addSection(planId, c, sec);
+        }
       },
     });
 
@@ -109,6 +218,14 @@ export function createSections(ctx: AppContext): {
     top.push(addBtn);
 
     const children: HTMLElement[] = [h("div", { class: "tsh-sec-top" }, top)];
+    if (otherOfCourse) {
+      children.push(
+        h("div", {
+          class: "tsh-sec-note",
+          text: `${otherOfCourse.section.eventPkgText} is currently planned for this course.`,
+        }),
+      );
+    }
     if (conflictParts.length > 0) {
       children.push(
         h("div", {
@@ -117,6 +234,8 @@ export function createSections(ctx: AppContext): {
         }),
       );
     }
+    const liveEl = liveLine(sec);
+    if (liveEl) children.push(liveEl);
     children.push(h("div", { class: "tsh-meetings" }, sec.meetings.map(meetingLine)));
 
     const cls = `tsh-sec${already ? " tsh-sec-added" : ""}${

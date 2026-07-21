@@ -1,5 +1,5 @@
 import type { TssClient } from "../api/tss";
-import type { Term } from "../api/types";
+import type { CourseSummary, Term } from "../api/types";
 import type { Plan, PlanStore } from "../model/plan";
 
 // Shared read surface passed to every UI component. The panel owns the mutable state and
@@ -22,6 +22,8 @@ export interface AppContext {
   getPlans(): Plan[];
   getActivePlanId(): string | null;
   getActivePlan(): Plan | null;
+  /** Open the sections browser for a course and scroll to it (drives the "Switch" buttons). */
+  showSections(course: CourseSummary): void;
   /** Subscribe to state changes; returns an unsubscribe fn. */
   subscribe(listener: (reason: ChangeReason) => void): () => void;
 }

@@ -14,6 +14,15 @@ export function courseKey(
   return `${c.year}-${c.period}-${c.moduleID}`;
 }
 
+/**
+ * A weekly meeting with no set time yet — e.g. a lab whose time isn't arranged. TSS shows these
+ * explicitly as "TBA"; we do the same. Excludes finals and dated exams (which carry their own
+ * date and are surfaced separately), so this catches only genuinely-unscheduled recurring parts.
+ */
+export function isUnscheduled(m: Meeting): boolean {
+  return !m.isFinal && !m.start && !/\d{1,2}\/\d{1,2}\/\d{4}/.test(m.raw);
+}
+
 export interface CourseGroup {
   key: string;
   course: CourseSummary;

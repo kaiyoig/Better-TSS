@@ -3,6 +3,7 @@ import type {
   CapacityColor,
   CourseDetail,
   CourseSummary,
+  LiveStatus,
   Meeting,
   Section,
   Term,
@@ -11,6 +12,10 @@ import type {
 const SAP_CLIENT = "500";
 const SERVICE_ROOT =
   "https://tss.ucsd.edu/sap/opu/odata4/sap/yucsd_con_module_sb/srvd/sap/yucsd_con_module_servicedef/0001/";
+
+// The booking/enrollment side is a *separate* OData **v2** service ("My Modules"). We only read
+// from it here (live seats + registration window); reads are safe methods, so no CSRF handshake.
+const MODULES_V2_ROOT = "https://tss.ucsd.edu/sap/opu/odata/ITUS/PR_MY_MODULES_V2_SRV/";
 
 const SEARCH_SELECT = [
   "AcademicLevel",
@@ -148,6 +153,37 @@ export class TssClient {
     const sections = await this.getSections(course);
     return { ...course, sections };
   }
+
+  /**
+   * Live enrollment status for one section, from the v2 booking service. A plain credentialed GET
+   * of the `ModuleHeaderSet` entity keyed by the section's EventPackage (a program-agnostic
+   * `ScObjid='00000000'` + all-zeros `ModregId` gives the read-only, not-yet-booked view).
+   */
+  async getLiveStatus(
+    course: Pick<CourseSummary, "year" | "period" | "moduleID">,
+    section: Pick<Section, "pkgObjid">,
+  ): Promise<LiveStatus> {
+    if (!section.pkgObjid) {
+      throw new TssError("Section is missing its EventPackage ID — cannot read live status.");
+    }
+    const key =
+      `SmObjid='${course.moduleID}',SmOtype='SM',ScObjid='00000000',` +
+      `ModregId=guid'00000000-0000-0000-0000-000000000000',` +
+      `EventPackageId='${section.pkgObjid}',AcademicYear='${course.year}',` +
+      `AcademicSession='${course.period}'`;
+    const url = `${MODULES_V2_ROOT}ModuleHeaderSet(${key})?sap-client=${SAP_CLIENT}`;
+    const res = await fetch(url, {
+      method: "GET",
+      credentials: "include",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) {
+      throw new TssError(`Live status request failed (${res.status})`, await safeText(res));
+    }
+    const json = (await res.json()) as { d?: RawModuleHeader };
+    if (!json.d) throw new TssError("Live status response had no data.");
+    return mapLiveStatus(json.d);
+  }
 }
 
 // ---- mapping helpers ----
@@ -188,6 +224,7 @@ function groupSections(events: RawEvent[]): Section[] {
     );
     sections.push({
       eventPkgText: head.EventPkgText,
+      pkgObjid: head.EventPkgObjid ?? "",
       limit: toInt(head.EventPkgLimit),
       seatsAvailable: toInt(head.EventPkgSeatsAvailable),
       waitlist: toInt(head.EventPkgNumOnWaitl),
@@ -196,6 +233,32 @@ function groupSections(events: RawEvent[]): Section[] {
     });
   }
   return sections;
+}
+
+function mapLiveStatus(d: RawModuleHeader): LiveStatus {
+  return {
+    openSeats: toInt(d.OpenSeats),
+    openSeatsWaitlist: toInt(d.OpenSeatsWaitlist),
+    statusText: d.SmStatusText ?? "",
+    waitlistBooking: d.WaitlistBooking === true,
+    onWishList: d.OnWishList === true,
+    registrationBegin: parseSapDate(d.RegistrationBeginDate),
+    registrationEnd: parseSapDate(d.RegistrationEndDate),
+  };
+}
+
+/** OData v2 serializes dates as `/Date(<epoch-ms>)/`. Returns null for missing/unparseable input. */
+function parseSapDate(v: string | undefined): Date | null {
+  const m = /\/Date\((\d+)\)\//.exec(v ?? "");
+  return m ? new Date(Number(m[1])) : null;
+}
+
+async function safeText(res: Response): Promise<string> {
+  try {
+    return (await res.text()).slice(0, 400);
+  } catch {
+    return "";
+  }
 }
 
 function capacityColor(code: number | string | undefined): CapacityColor {
@@ -290,9 +353,21 @@ interface RawEvent {
   InstructorEmail: string;
   Sched: string;
   EventPkgOtjid: string;
+  EventPkgObjid: string;
   EventPkgText: string;
   EventPkgLimit: string;
   EventPkgSeatsAvailable: string;
   EventPkgNumOnWaitl: number;
   EventPkgSemanticColorCapacity: number;
+}
+
+/** Subset of the v2 `ModuleHeader` entity we read for live status (see RECON.md). */
+interface RawModuleHeader {
+  OpenSeats?: number | string;
+  OpenSeatsWaitlist?: number | string;
+  SmStatusText?: string;
+  WaitlistBooking?: boolean;
+  OnWishList?: boolean;
+  RegistrationBeginDate?: string;
+  RegistrationEndDate?: string;
 }

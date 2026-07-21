@@ -1,5 +1,5 @@
 import type { TssClient } from "../api/tss";
-import type { Term } from "../api/types";
+import type { CourseSummary, Term } from "../api/types";
 import type { Plan, PlanStore } from "../model/plan";
 import { CALENDAR_EXTRA_STYLES, createCalendar } from "./calendar";
 import { CONFLICT_STYLES } from "./conflicts";
@@ -74,6 +74,9 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
     for (const l of listeners) l(reason);
   };
 
+  // Late-bound: `sections` is created below, after ctx. Reassigned once it exists.
+  let showSectionsImpl: (course: CourseSummary) => void = () => {};
+
   const ctx: AppContext = {
     client,
     store,
@@ -85,6 +88,7 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
     getPlans: () => plans,
     getActivePlanId: () => activePlanId,
     getActivePlan: () => plans.find((p) => p.id === activePlanId) ?? null,
+    showSections: (course) => showSectionsImpl(course),
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -145,6 +149,14 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
     sections.load(course);
     sections.el.scrollIntoView({ behavior: "smooth", block: "nearest" });
   });
+
+  // Now that `sections` exists, back the context's showSections with it. Ensure the drawer is open
+  // (a Switch click may come from a view while the panel is somehow collapsed) before scrolling.
+  showSectionsImpl = (course) => {
+    wrap.classList.add("open");
+    sections.load(course);
+    sections.el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  };
 
   // Right column is a WebReg-style tabbed view: List / Calendar / Finals. Each view self-renders
   // on plan changes; the tabs just show one at a time.
