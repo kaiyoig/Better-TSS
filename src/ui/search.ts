@@ -53,6 +53,8 @@ export function createSearch(
       }
       status.textContent = `Showing ${res.courses.length} of ${res.count} result(s)`;
       for (const c of res.courses) results.append(row(c));
+      // A single match is almost certainly the intended course — load its sections immediately.
+      if (res.courses.length === 1) onSelect(res.courses[0]);
     } catch (err) {
       if (myReq !== reqId) return;
       status.className = "tsh-status";
