@@ -2,7 +2,7 @@ import type { CourseSummary, Meeting, Section } from "../api/types";
 import { courseKey } from "../model/planOps";
 import type { Plan } from "../model/plan";
 import { plannedSectionId } from "../model/plan";
-import { sectionsConflict } from "../model/schedule";
+import { meetingsOverlap } from "../model/schedule";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
 import { errorMessage } from "./util";
@@ -67,17 +67,22 @@ export function createSections(ctx: AppContext): {
     const id = plannedSectionId(c, sec);
     const already = (plan?.sections ?? []).some((s) => s.id === id);
 
-    // Which already-planned courses (other than this one) does this section clash with?
+    // Which specific parts of other planned courses does this section clash with? Report the
+    // exact part, e.g. "CSE-103 Discussion" — comparing meeting-by-meeting, skipping this course.
     const key = courseKey(c);
-    const conflictAbbrs = [
-      ...new Set(
-        (plan?.sections ?? [])
-          .filter(
-            (ps) => courseKey(ps.course) !== key && sectionsConflict(sec, ps.section),
-          )
-          .map((ps) => ps.course.abbr),
-      ),
-    ];
+    const conflictParts: string[] = [];
+    const seen = new Set<string>();
+    for (const ps of plan?.sections ?? []) {
+      if (courseKey(ps.course) === key) continue;
+      for (const pm of ps.section.meetings) {
+        if (!sec.meetings.some((sm) => meetingsOverlap(sm, pm))) continue;
+        const label = `${ps.course.abbr} ${pm.methodText || pm.method}`;
+        if (!seen.has(label)) {
+          seen.add(label);
+          conflictParts.push(label);
+        }
+      }
+    }
 
     const addBtn = h("button", {
       class: "tsh-btn tsh-add",
@@ -101,18 +106,18 @@ export function createSections(ctx: AppContext): {
     top.push(addBtn);
 
     const children: HTMLElement[] = [h("div", { class: "tsh-sec-top" }, top)];
-    if (conflictAbbrs.length > 0) {
+    if (conflictParts.length > 0) {
       children.push(
         h("div", {
           class: "tsh-sec-conflict",
-          text: `⚠ Time conflict with ${conflictAbbrs.join(", ")}`,
+          text: `⚠ Time conflict with ${conflictParts.join(", ")}`,
         }),
       );
     }
     children.push(h("div", { class: "tsh-meetings" }, sec.meetings.map(meetingLine)));
 
     const cls = `tsh-sec${already ? " tsh-sec-added" : ""}${
-      conflictAbbrs.length > 0 ? " tsh-sec-conflicted" : ""
+      conflictParts.length > 0 ? " tsh-sec-conflicted" : ""
     }`;
     return h("div", { class: cls }, children);
   }

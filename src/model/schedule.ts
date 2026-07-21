@@ -50,6 +50,13 @@ export function sectionsConflict(a: Section, b: Section): boolean {
   return ba.some((x) => bb.some((y) => blocksOverlap(x, y)));
 }
 
+/** True if two individual meetings share an overlapping weekly block. */
+export function meetingsOverlap(a: Meeting, b: Meeting): boolean {
+  const ba = meetingBlocks(a);
+  const bb = meetingBlocks(b);
+  return ba.some((x) => bb.some((y) => blocksOverlap(x, y)));
+}
+
 export interface Conflict {
   a: string; // PlannedSection id
   b: string; // PlannedSection id
