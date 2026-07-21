@@ -4,3 +4,6 @@ dist/
 
 # Captured traffic — may contain personal session data. Keep local, do not commit.
 *.har
+
+# Packaged build artifacts (produced by CI / local zipping)
+*.zip

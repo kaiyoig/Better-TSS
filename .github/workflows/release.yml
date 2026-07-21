@@ -1,0 +1,44 @@
+name: Build & Release
+
+# Builds the extension and publishes it as a downloadable zip on a rolling "latest" release,
+# so there is always a one-click download at:
+#   https://github.com/kaiyoig/Better-TSS/releases/latest/download/better-tss.zip
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: # lets you re-run it manually from the Actions tab
+
+permissions:
+  contents: write # required to create/update the release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build # tsc --noEmit && vite build → dist/
+
+      # Zip the built extension so the contents (manifest.json at the root) unzip ready for
+      # "Load unpacked".
+      - name: Package dist/
+        run: cd dist && zip -r ../better-tss.zip . && cd ..
+
+      - name: Publish rolling "latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          body: |
+            Latest build of Better TSS.
+
+            **Install:** download `better-tss.zip`, unzip it somewhere permanent, then open
+            `chrome://extensions` → enable Developer mode → Load unpacked → select the unzipped folder.
+          files: better-tss.zip
+          make_latest: true
