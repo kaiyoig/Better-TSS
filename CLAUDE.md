@@ -95,6 +95,7 @@ changes, reload the extension AND refresh the TSS tab.
 - **`CachedTss` is unwired** — the UI calls `TssClient` directly. Wiring needs a small
   `CourseSource` interface (the two aren't structurally interchangeable — `TssClient` has private
   fields).
-- **Conflict list** covers weekly-vs-weekly and exam-vs-weekly, not exam-vs-exam.
+- **Conflict list** covers weekly-vs-weekly, exam-vs-weekly, and exam-vs-exam (the last matched on
+  the actual calendar date, so two exams on the same weekday of different weeks don't false-flag).
 - **Finals columns** are weekday-keyed; a true two-Saturday span would require date-based columns.
 - **Live testing** — verify the `Sched` parser against more real formats (labs, multi-line, TBA).

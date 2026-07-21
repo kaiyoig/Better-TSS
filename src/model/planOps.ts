@@ -79,6 +79,16 @@ export interface FinalInfo {
 const DATE_RE = /(\d{1,2})\/(\d{1,2})\/(\d{4})/;
 const JS_DAY_TO_TOKEN: Day[] = ["Su", "M", "Tu", "W", "Th", "F", "Sa"];
 
+/** Canonical date key ("M/D/YYYY", no leading zeros) so "12/08/2026" and "12/8/2026" compare equal. */
+function dateKey(date: string): string {
+  return date.split("/").map((n) => String(Number(n))).join("/");
+}
+
+/** A one-off dated exam: a final, or a non-weekly meeting carrying a calendar date (a midterm). */
+function isExamMeeting(m: Meeting): boolean {
+  return m.isFinal || (m.days.length === 0 && DATE_RE.test(m.raw));
+}
+
 /** Parse a final-exam meeting's date/weekday/time out of its raw Sched text. */
 export function parseFinal(meeting: Meeting): FinalInfo {
   const m = meeting.raw.match(DATE_RE);
@@ -142,9 +152,10 @@ function partLabel(course: CourseSummary, m: Meeting): string {
 }
 
 /**
- * Every distinct pair of meetings from DIFFERENT courses that overlap in time — covering both
- * weekly-vs-weekly overlaps and dated-exam-vs-weekly overlaps (matched on the exam's weekday).
- * Returned as "ABBR Part" label pairs for a human-readable conflict list.
+ * Every distinct pair of meetings from DIFFERENT courses that overlap in time — covering
+ * weekly-vs-weekly, dated-exam-vs-weekly (matched on the exam's weekday), and exam-vs-exam
+ * (midterm/final vs midterm/final, matched on the actual calendar date). Returned as "ABBR Part"
+ * label pairs for a human-readable conflict list.
  */
 export function conflictPairs(planned: PlannedSection[]): ConflictPair[] {
   const out: ConflictPair[] = [];
@@ -192,12 +203,41 @@ export function conflictPairs(planned: PlannedSection[]): ConflictPair[] {
     }
   }
 
+  // exam vs exam (midterm/final vs midterm/final), matched by the actual calendar date + time.
+  const exams: Array<{ key: string; label: string; date: string; s: number; e: number }> = [];
+  for (const ps of planned) {
+    for (const m of ps.section.meetings) {
+      if (!isExamMeeting(m)) continue;
+      const info = parseFinal(m);
+      const s = timeToMinutes(info.start);
+      const e = timeToMinutes(info.end);
+      if (info.date == null || s == null || e == null) continue;
+      exams.push({
+        key: courseKey(ps.course),
+        label: partLabel(ps.course, m),
+        date: dateKey(info.date),
+        s,
+        e,
+      });
+    }
+  }
+  for (let i = 0; i < exams.length; i++) {
+    for (let j = i + 1; j < exams.length; j++) {
+      const a = exams[i];
+      const b = exams[j];
+      if (a.key !== b.key && a.date === b.date && a.s < b.e && b.s < a.e) {
+        add(a.label, b.label);
+      }
+    }
+  }
+
   return out;
 }
 
 /**
- * Weekly meetings (lecture/discussion/lab) of OTHER courses that clash with a dated exam:
- * same weekday as the exam plus an overlapping time window. Returns "ABBR Part" labels.
+ * Meetings of OTHER courses that clash with a dated exam: weekly parts on the exam's weekday with
+ * an overlapping time, plus other exams (midterms/finals) on the same calendar date with an
+ * overlapping time. Returns "ABBR Part" labels.
  */
 export function examConflicts(
   exam: FinalInfo,
@@ -207,13 +247,24 @@ export function examConflicts(
   const s = timeToMinutes(exam.start);
   const e = timeToMinutes(exam.end);
   if (exam.day == null || s == null || e == null) return [];
+  const examDate = exam.date ? dateKey(exam.date) : null;
   const labels = new Set<string>();
   for (const ps of planned) {
     if (courseKey(ps.course) === selfCourseKey) continue;
     for (const m of ps.section.meetings) {
+      // Weekly parts sharing the exam's weekday.
       for (const b of meetingBlocks(m)) {
         if (b.day === exam.day && s < b.end && b.start < e) {
           labels.add(`${ps.course.abbr} ${m.methodText || m.method}`);
+        }
+      }
+      // Another course's exam on the same actual date.
+      if (examDate && isExamMeeting(m)) {
+        const info = parseFinal(m);
+        const os = timeToMinutes(info.start);
+        const oe = timeToMinutes(info.end);
+        if (info.date && dateKey(info.date) === examDate && os != null && oe != null && s < oe && os < e) {
+          labels.add(partLabel(ps.course, m));
         }
       }
     }
