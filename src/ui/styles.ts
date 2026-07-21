@@ -204,6 +204,7 @@ export const STYLES = `
 .tsh-m { font-size: 11px; color: #475569; }
 .tsh-m-method { font-weight: 600; color: #334155; }
 .tsh-m-final { color: #7c3aed; }
+.tsh-m-exam { color: #7c3aed; }
 
 /* Calendar */
 .tsh-cal-wrap { display: flex; flex-direction: column; gap: 8px; }

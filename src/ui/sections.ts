@@ -7,6 +7,9 @@ import type { AppContext } from "./context";
 import { clear, h } from "./dom";
 import { errorMessage } from "./util";
 
+// A calendar date (MM/DD/YYYY) marks a one-off event (exam), not a weekly meeting.
+const DATED_RE = /\d{1,2}\/\d{1,2}\/\d{4}/;
+
 /** Section browser for a chosen course: seats, capacity, meetings, and an Add-to-plan action. */
 export function createSections(ctx: AppContext): {
   el: HTMLElement;
@@ -47,19 +50,19 @@ export function createSections(ctx: AppContext): {
   }
 
   function meetingLine(m: Meeting): HTMLElement {
+    // One-off dated events (final exams, midterms, …) aren't weekly meetings — their raw line is
+    // self-describing ("Midterm Examination 10/20/2026 6:00 PM - 7:50 PM …"), so show it verbatim.
+    if (m.isFinal || (m.days.length === 0 && DATED_RE.test(m.raw))) {
+      return h("div", { class: "tsh-m tsh-m-exam", text: m.raw });
+    }
     const bits: Array<Node | string> = [
       h("span", { class: "tsh-m-method", text: m.methodText || m.method }),
     ];
-    if (m.isFinal) {
-      bits.push(" ", h("span", { class: "tsh-m-final", text: "· Final exam" }));
-      bits.push(" · " + m.raw);
-    } else {
-      const when = [m.days.join(""), [m.start, m.end].filter(Boolean).join("–")]
-        .filter(Boolean)
-        .join(" ");
-      const extra = [when, m.mode, m.location, m.instructor].filter(Boolean).join(" · ");
-      if (extra) bits.push(" · " + extra);
-    }
+    const when = [m.days.join(""), [m.start, m.end].filter(Boolean).join("–")]
+      .filter(Boolean)
+      .join(" ");
+    const extra = [when, m.mode, m.location, m.instructor].filter(Boolean).join(" · ");
+    if (extra) bits.push(" · " + extra);
     return h("div", { class: "tsh-m" }, bits);
   }
 

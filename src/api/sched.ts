@@ -75,18 +75,18 @@ function parseLine(
 }
 
 function extractDays(prefix: string): string[] {
+  // A genuine weekly day prefix is ONLY day tokens + separators, e.g. "M, W, F" or "TuTh".
+  // If anything else appears (e.g. "Midterm Examination 10/20/2026"), it's a one-off dated event,
+  // not a weekly meeting — return no days so it never lands on the weekly grid.
+  const compact = prefix.replace(/[\s,]+/g, "");
   const out: string[] = [];
-  // Longest-token-first scan so "Th" wins over "T", "Su"/"Sa" over "S".
   let i = 0;
-  while (i < prefix.length) {
-    const rest = prefix.slice(i);
-    const tok = DAY_TOKENS.find((d) => rest.startsWith(d));
-    if (tok) {
-      out.push(tok);
-      i += tok.length;
-    } else {
-      i += 1;
-    }
+  while (i < compact.length) {
+    // Longest-token-first via DAY_TOKENS order ("Tu"/"Th" before single letters, "Su"/"Sa").
+    const tok = DAY_TOKENS.find((d) => compact.startsWith(d, i));
+    if (!tok) return []; // non-day content → not a weekly meeting
+    out.push(tok);
+    i += tok.length;
   }
   return out;
 }
