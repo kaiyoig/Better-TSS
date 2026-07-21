@@ -7,8 +7,13 @@ import { mountPanel } from "../ui/panel";
 const client = new TssClient();
 const store = createPlanStore();
 
-mountPanel(client, store);
+const panel = mountPanel(client, store);
 
-console.info("[TSS Hook] planner overlay mounted");
+// Let the toolbar icon open/close the planner (background forwards the click here).
+chrome.runtime.onMessage.addListener((msg: { type?: string }) => {
+  if (msg?.type === "tsshook:toggle") panel.toggle();
+});
+
+console.info("[TSS Hook] planner overlay mounted — look for the 📅 Planner button (bottom-right)");
 
 export {};

@@ -13,14 +13,25 @@ import { TERM_PRESETS, createTermSelector, termFromYearPeriod } from "./term";
 const HOST_ID = "tsshook-root";
 const DEFAULT_TERM: Term = TERM_PRESETS[0];
 
+/** Imperative handle returned by mountPanel, so external triggers (toolbar icon) can drive it. */
+export interface PanelHandle {
+  toggle(): void;
+  open(): void;
+  close(): void;
+}
+
 /**
  * Mount the self-contained planner overlay: a Shadow DOM host on <body>, a floating toggle,
  * and a sliding drawer. The panel owns all app state and implements AppContext; components read
  * through it and re-render on subscribe. PlanStore is the single source of truth for plans — its
  * `subscribe` drives a reload → re-render, so mutations from any component flow back uniformly.
  */
-export function mountPanel(client: TssClient, store: PlanStore): void {
-  if (document.getElementById(HOST_ID)) return; // guard against double injection
+export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
+  // Guard against double injection; hand back a handle bound to the existing instance if present.
+  const existing = (window as unknown as { __tsshookPanel?: PanelHandle }).__tsshookPanel;
+  if (document.getElementById(HOST_ID)) {
+    return existing ?? { toggle() {}, open() {}, close() {} };
+  }
 
   // ---- state ----
   let term: Term = DEFAULT_TERM;
@@ -127,4 +138,12 @@ export function mountPanel(client: TssClient, store: PlanStore): void {
       await store.setActivePlanId(plans[0].id);
     }
   })();
+
+  const handle: PanelHandle = {
+    toggle: () => wrap.classList.toggle("open"),
+    open: () => wrap.classList.add("open"),
+    close: () => wrap.classList.remove("open"),
+  };
+  (window as unknown as { __tsshookPanel?: PanelHandle }).__tsshookPanel = handle;
+  return handle;
 }
