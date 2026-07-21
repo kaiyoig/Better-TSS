@@ -1,9 +1,11 @@
 import type { TssClient } from "../api/tss";
 import type { Term } from "../api/types";
 import type { Plan, PlanStore } from "../model/plan";
-import { createCalendar } from "./calendar";
+import { CALENDAR_EXTRA_STYLES, createCalendar } from "./calendar";
 import type { AppContext, ChangeReason } from "./context";
 import { h } from "./dom";
+import { FINALS_STYLES, createFinals } from "./finals";
+import { LIST_STYLES, createList } from "./list";
 import { createPlans } from "./plans";
 import { createSearch } from "./search";
 import { createSections } from "./sections";
@@ -12,6 +14,34 @@ import { TERM_PRESETS, createTermSelector, termFromYearPeriod } from "./term";
 
 const HOST_ID = "tsshook-root";
 const DEFAULT_TERM: Term = TERM_PRESETS[0];
+
+type ViewKey = "list" | "calendar" | "finals";
+
+// Tab bar + view styles (WebReg's List / Calendar / Finals tabs). Kept here since the tab shell
+// is the panel's concern; each view ships its own content styles.
+const TAB_STYLES = `
+.tsh-tabs { display: flex; gap: 4px; margin-bottom: 12px; border-bottom: 2px solid #cbd5e1; }
+.tsh-tab {
+  font: inherit;
+  font-weight: 600;
+  padding: 7px 16px;
+  border: 1px solid #cbd5e1;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: #e2e8f0;
+  color: #475569;
+  cursor: pointer;
+  margin-bottom: -2px;
+}
+.tsh-tab:hover { background: #eef2ff; }
+.tsh-tab-active {
+  background: #f4f6fb;
+  color: #1d4ed8;
+  border-color: #cbd5e1;
+  border-bottom: 2px solid #f4f6fb;
+}
+.tsh-view-hidden { display: none; }
+`;
 
 /** Imperative handle returned by mountPanel, so external triggers (toolbar icon) can drive it. */
 export interface PanelHandle {
@@ -77,7 +107,13 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
   host.id = HOST_ID;
   const shadow = host.attachShadow({ mode: "open" });
   const style = document.createElement("style");
-  style.textContent = STYLES;
+  style.textContent = [
+    STYLES,
+    TAB_STYLES,
+    CALENDAR_EXTRA_STYLES,
+    LIST_STYLES,
+    FINALS_STYLES,
+  ].join("\n");
 
   const wrap = h("div", { class: "tsh-wrap" });
 
@@ -100,21 +136,63 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
   const termSelector = createTermSelector(ctx);
   const plansSwitcher = createPlans(ctx);
   const calendar = createCalendar(ctx);
+  const list = createList(ctx);
+  const finals = createFinals(ctx);
   const sections = createSections(ctx);
   const search = createSearch(ctx, (course) => {
     sections.load(course);
     sections.el.scrollIntoView({ behavior: "smooth", block: "nearest" });
   });
 
-  // Two columns on wide screens: browse controls on the left, the calendar (which benefits most
-  // from width) on the right. Collapses to a single stacked column on narrow screens via CSS.
+  // Right column is a WebReg-style tabbed view: List / Calendar / Finals. Each view self-renders
+  // on plan changes; the tabs just show one at a time.
+  const viewEls: Record<ViewKey, HTMLElement> = {
+    list: list.el,
+    calendar: calendar.el,
+    finals: finals.el,
+  };
+  const tabDefs: Array<{ key: ViewKey; label: string }> = [
+    { key: "list", label: "List" },
+    { key: "calendar", label: "Calendar" },
+    { key: "finals", label: "Finals" },
+  ];
+  let activeView: ViewKey = "calendar";
+  const tabButtons = new Map<ViewKey, HTMLButtonElement>();
+  const setView = (k: ViewKey): void => {
+    activeView = k;
+    for (const key of Object.keys(viewEls) as ViewKey[]) {
+      viewEls[key].classList.toggle("tsh-view-hidden", key !== activeView);
+    }
+    for (const [key, btn] of tabButtons) {
+      btn.classList.toggle("tsh-tab-active", key === activeView);
+    }
+  };
+  const tabBar = h("div", { class: "tsh-tabs" });
+  for (const def of tabDefs) {
+    const btn = h("button", {
+      class: "tsh-tab",
+      text: def.label,
+      onClick: () => setView(def.key),
+    });
+    tabButtons.set(def.key, btn);
+    tabBar.append(btn);
+  }
+
+  // Two columns on wide screens: browse controls on the left, the tabbed schedule (which
+  // benefits most from width) on the right. Collapses to a single stacked column when narrow.
   const leftCol = h("div", { class: "tsh-col tsh-col-left" }, [
     termSelector.el,
     plansSwitcher.el,
     search.el,
     sections.el,
   ]);
-  const rightCol = h("div", { class: "tsh-col tsh-col-right" }, [calendar.el]);
+  const rightCol = h("div", { class: "tsh-col tsh-col-right" }, [
+    tabBar,
+    list.el,
+    calendar.el,
+    finals.el,
+  ]);
+  setView(activeView);
   const content = h("div", { class: "tsh-content" }, [leftCol, rightCol]);
 
   const drawer = h("div", { class: "tsh-drawer" }, [header, content]);

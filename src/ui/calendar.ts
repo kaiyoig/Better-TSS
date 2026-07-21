@@ -6,6 +6,7 @@ import {
   sectionBlocks,
   totalUnits,
 } from "../model/schedule";
+import { courseKey, dropCourse, groupByCourse } from "../model/planOps";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
 
@@ -141,6 +142,19 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
           const ev = h("div", {
             class: `tsh-ev${conflicted ? " tsh-ev-conflict" : ""}`,
           }, lines);
+          // Drop control pinned to the block's corner: dropping one part drops the whole course.
+          ev.append(
+            h("button", {
+              class: "tsh-ev-drop",
+              text: "Drop",
+              title: `Drop ${ps.course.abbr}`,
+              onClick: (event) => {
+                event.stopPropagation();
+                const planId = ctx.getActivePlanId();
+                if (planId) void dropCourse(ctx.store, planId, courseKey(ps.course));
+              },
+            }),
+          );
           ev.style.top = `${top}px`;
           ev.style.height = `${height}px`;
           ev.style.background = bg;
@@ -167,26 +181,26 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
       if (legend.childNodes.length > 0) wrap.append(legend);
     }
 
-    // Removable list of planned sections.
+    // Droppable list — one row per course (its LE/DI/LA parts collapse into a single entry).
     if (planned.length > 0) {
       const list = h("div", { class: "tsh-planned" });
-      for (const ps of planned) {
-        const conflicted = conflicts.has(ps.id);
-        const remove = h("button", {
-          class: "tsh-remove",
-          text: "×",
-          title: "Remove from plan",
+      for (const group of groupByCourse(planned)) {
+        const conflicted = group.planned.some((ps) => conflicts.has(ps.id));
+        const drop = h("button", {
+          class: "tsh-course-drop",
+          text: "Drop",
+          title: `Drop ${group.course.abbr} (all sections)`,
           onClick: () => {
             const planId = ctx.getActivePlanId();
-            if (planId) void ctx.store.removeSection(planId, ps.id);
+            if (planId) void dropCourse(ctx.store, planId, group.key);
           },
         });
         list.append(
           h("div", { class: `tsh-planned-row${conflicted ? " tsh-conflict" : ""}` }, [
-            h("span", { class: "tsh-planned-abbr", text: ps.course.abbr }),
-            h("span", { class: "tsh-planned-name", text: ps.section.eventPkgText }),
-            h("span", { class: "tsh-planned-units", text: `${ps.course.units}u` }),
-            remove,
+            h("span", { class: "tsh-planned-abbr", text: group.course.abbr }),
+            h("span", { class: "tsh-planned-name", text: group.course.title }),
+            h("span", { class: "tsh-planned-units", text: `${group.course.units}u` }),
+            drop,
           ]),
         );
       }
@@ -201,3 +215,56 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
   render();
   return { el };
 }
+
+// Injected into the shadow-root stylesheet by the integrator (see panel wiring). Only classes
+// introduced by this component live here; existing `.tsh-*` classes come from styles.ts.
+export const CALENDAR_EXTRA_STYLES = `
+/* Per-block Drop control, pinned to the event block's bottom-right corner. Faint until the
+   block is hovered/focused, but always clickable (not tooltip-only). It may overlap the last
+   detail line on very short (~50-minute) blocks rather than clip the time/course lines. */
+.tsh-ev-drop {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 1;
+  padding: 0 4px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #b91c1c;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1.3;
+  cursor: pointer;
+  opacity: 0.35;
+  transition: opacity 0.12s ease;
+}
+.tsh-ev:hover .tsh-ev-drop,
+.tsh-ev-drop:focus-visible {
+  opacity: 1;
+}
+.tsh-ev-drop:hover {
+  opacity: 1;
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+/* Per-course Drop button in the list beneath the grid. */
+.tsh-course-drop {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  color: #b91c1c;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tsh-course-drop:hover {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+`;
