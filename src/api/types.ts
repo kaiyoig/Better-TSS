@@ -60,13 +60,38 @@ export interface Section {
 export interface LiveStatus {
   openSeats: number;
   openSeatsWaitlist: number;
-  statusText: string; // SmStatusText, e.g. "Waitlist Inactive"
+  statusText: string; // SmStatusText, e.g. "Waitlist Inactive" / "Booked"
   waitlistBooking: boolean;
   onWishList: boolean;
   registrationBegin: Date | null;
   registrationEnd: Date | null;
+  /** True when the signed-in student is enrolled in this section (SmStatus "01" / real ModregId). */
+  booked: boolean;
+  /** The enrollment guid when booked, else null. */
+  modregId: string | null;
 }
 
 export interface CourseDetail extends CourseSummary {
   sections: Section[];
+}
+
+/**
+ * One live enrollment from the booked-modules service (`BC_OVP_BOOKED_MODULES_SRV/ModuleSet`).
+ * Note it identifies the *course* (module) but not which section — locating the booked section
+ * takes a catalog + live-status sweep (see `TssClient.locateBookedSection`).
+ */
+export interface Booking {
+  /** The booking guid (`ModregId`); non-zero means an actual enrollment exists. */
+  modregId: string;
+  /** Module ID with SAP's zero-padding stripped, e.g. "8366" — catalog-compatible. */
+  moduleID: string;
+  /** AcademicYear, e.g. "2026". */
+  year: string;
+  /** AcademicPeriod with padding stripped ("2"), catalog-compatible. */
+  period: string;
+  abbr: string; // SmShort, e.g. "MUS-008"
+  title: string; // SmStext
+  units: string; // Credits, e.g. "4.00"
+  termText: string; // "Fall Quarter 2026/2027"
+  conditional: boolean;
 }

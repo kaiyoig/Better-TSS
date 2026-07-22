@@ -5,7 +5,7 @@ import { plannedSectionId } from "../model/plan";
 import { meetingsOverlap } from "../model/schedule";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
-import { errorMessage } from "./util";
+import { confirmBook, confirmTssDrop, errorMessage } from "./util";
 
 // A calendar date (MM/DD/YYYY) marks a one-off event (exam), not a weekly meeting.
 const DATED_RE = /\d{1,2}\/\d{1,2}\/\d{4}/;
@@ -45,6 +45,9 @@ export function createSections(ctx: AppContext): {
   // Live enrollment status per section, keyed by pkgObjid. Undefined = still loading; the LIVE_ERROR
   // sentinel = the booking-service call failed (we fall back silently to the catalog snapshot).
   const live = new Map<string, LiveEntry>();
+  // In-flight Book/Drop label per section ("Booking…"/"Dropping…"), and the last op failure.
+  const busy = new Map<string, string>();
+  const opError = new Map<string, string>();
 
   function load(next: CourseSummary): void {
     course = next;
@@ -52,6 +55,8 @@ export function createSections(ctx: AppContext): {
     error = null;
     loading = true;
     live.clear();
+    busy.clear();
+    opError.clear();
     render();
     const target = next;
     ctx.client
@@ -126,6 +131,80 @@ export function createSections(ctx: AppContext): {
     ];
     if (st.onWishList) bits.push(h("span", { class: "tsh-live-wish", text: "On TSS wishlist" }));
     return h("div", { class: "tsh-live" }, bits);
+  }
+
+  /** Is the registration window open right now (both bounds optional)? */
+  function windowOpen(st: LiveStatus): boolean {
+    const now = new Date();
+    if (st.registrationBegin && now < st.registrationBegin) return false;
+    if (st.registrationEnd && now > st.registrationEnd) return false;
+    return true;
+  }
+
+  /** Run a real TSS Book/Drop for one section, then refresh live status via the bookings channel. */
+  function runBookingOp(
+    target: CourseSummary,
+    sec: Section,
+    label: string,
+    op: () => Promise<unknown>,
+  ): void {
+    busy.set(sec.pkgObjid, label);
+    opError.delete(sec.pkgObjid);
+    render();
+    op()
+      .then(() => {
+        busy.delete(sec.pkgObjid);
+        // Emitting "bookings" re-fetches this course's live status (see subscribe below) and
+        // refreshes the Booked tab.
+        ctx.notifyBookingsChanged();
+      })
+      .catch((err: unknown) => {
+        busy.delete(sec.pkgObjid);
+        if (course === target) {
+          opError.set(sec.pkgObjid, errorMessage(err));
+          render();
+        }
+      });
+  }
+
+  /**
+   * The real-enrollment controls for a card: "Book in TSS" when the window is open and a seat is
+   * free, "✓ Enrolled" + "Drop from TSS" when this section is booked. Nothing until live status
+   * arrives — booking decisions must not run on catalog-snapshot data.
+   */
+  function bookingControls(c: CourseSummary, sec: Section): Array<Node | string> {
+    const entry = live.get(sec.pkgObjid);
+    if (entry === undefined || entry === LIVE_ERROR) return [];
+    const pending = busy.get(sec.pkgObjid);
+    if (pending) {
+      return [h("span", { class: "tsh-book-busy", text: pending })];
+    }
+    if (entry.booked) {
+      return [
+        h("span", { class: "tsh-booked-badge", text: "✓ Enrolled" }),
+        h("button", {
+          class: "tsh-btn tsh-btn-danger",
+          text: "Drop from TSS",
+          title: `Cancel your ${c.abbr} enrollment in TSS`,
+          onClick: () => {
+            if (!confirmTssDrop(`${c.abbr} (${sec.eventPkgText})`)) return;
+            runBookingOp(c, sec, "Dropping…", () => ctx.client.dropSection(c, sec));
+          },
+        }),
+      ];
+    }
+    if (!windowOpen(entry) || entry.openSeats <= 0) return [];
+    return [
+      h("button", {
+        class: "tsh-btn tsh-book",
+        text: "Book in TSS",
+        title: `Enroll in ${sec.eventPkgText} right now`,
+        onClick: () => {
+          if (!confirmBook(`${c.abbr} (${sec.eventPkgText})`)) return;
+          runBookingOp(c, sec, "Booking…", () => ctx.client.bookSection(c, sec));
+        },
+      }),
+    ];
   }
 
   function meetingLine(m: Meeting): HTMLElement {
@@ -216,8 +295,13 @@ export function createSections(ctx: AppContext): {
       top.push(h("span", { class: "tsh-wl", text: `WL ${sec.waitlist}` }));
     }
     top.push(addBtn);
+    top.push(...bookingControls(c, sec));
 
     const children: HTMLElement[] = [h("div", { class: "tsh-sec-top" }, top)];
+    const opErr = opError.get(sec.pkgObjid);
+    if (opErr) {
+      children.push(h("div", { class: "tsh-sec-conflict", text: `⚠ ${opErr}` }));
+    }
     if (otherOfCourse) {
       children.push(
         h("div", {
@@ -273,8 +357,11 @@ export function createSections(ctx: AppContext): {
   }
 
   // Re-render on plan changes so "Add"/"Added" state and active-plan availability stay in sync.
+  // On a bookings change (from here or the Booked tab), re-poll live status so "✓ Enrolled",
+  // seat counts, and Book/Drop buttons reflect the new reality.
   ctx.subscribe((reason) => {
     if (reason === "plans") render();
+    if (reason === "bookings" && course && sections) loadLive(course, sections);
   });
 
   render();

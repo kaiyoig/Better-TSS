@@ -1,5 +1,6 @@
 import type { Meeting } from "../api/types";
 import type { PlannedSection } from "../model/plan";
+import { plannedSectionId } from "../model/plan";
 import type { Day } from "../model/schedule";
 import { DAY_ORDER, meetingBlocks, sectionBlocks, totalUnits } from "../model/schedule";
 import {
@@ -10,8 +11,9 @@ import {
   groupByCourse,
   isUnscheduled,
 } from "../model/planOps";
+import { createBookingRunner } from "./bookingOps";
 import { conflictListEl } from "./conflicts";
-import type { AppContext } from "./context";
+import type { AppContext, ResolvedBooking } from "./context";
 import { clear, h } from "./dom";
 import { confirmDrop } from "./util";
 
@@ -25,6 +27,10 @@ interface EvBlock {
   conflicted: boolean;
   lane: number;
   lanes: number;
+  /** The student is enrolled in this section in TSS. */
+  booked: boolean;
+  /** Booked but not in the plan — shown as an overlay; its Drop is a real TSS drop. */
+  bookedOnly: boolean;
 }
 
 /**
@@ -116,10 +122,30 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
   const wrap = h("div", { class: "tsh-cal-wrap" });
   el.append(wrap);
 
+  const booking = createBookingRunner(ctx, () => render());
+
   function render(): void {
     clear(wrap);
     const plan = ctx.getActivePlan();
     const planned = plan?.sections ?? [];
+
+    // Live enrollments overlay. Booked sections render on the grid alongside planned ones —
+    // merged (✓ styling) when the same section is planned, as extra blocks when it isn't.
+    const enrollments = ctx.getBookings();
+    const bookedByCourse = new Map<string, ResolvedBooking>();
+    const bookedIds = new Set<string>();
+    const bookedExtras: PlannedSection[] = [];
+    for (const rb of enrollments) {
+      bookedByCourse.set(courseKey(rb.course), rb);
+      if (!rb.section) continue;
+      const id = plannedSectionId(rb.course, rb.section);
+      bookedIds.add(id);
+      if (!planned.some((ps) => ps.id === id)) {
+        bookedExtras.push({ id, course: rb.course, section: rb.section, addedAt: 0 });
+      }
+    }
+    const extraIds = new Set(bookedExtras.map((ps) => ps.id));
+    const gridSections = [...planned, ...bookedExtras];
 
     // Total units over unique courses (a course's LE + DI count once).
     const uniqueCourses = new Map<string, { units: string }>();
@@ -193,7 +219,7 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
 
     // Which day columns to show: Mon–Fri always, plus any weekend day with a block.
     const present = new Set<Day>();
-    for (const ps of planned) for (const b of sectionBlocks(ps.section)) present.add(b.day);
+    for (const ps of gridSections) for (const b of sectionBlocks(ps.section)) present.add(b.day);
     const days = DAY_ORDER.filter((d) => BASE_DAYS.has(d) || present.has(d));
 
     // Header row.
@@ -227,7 +253,7 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
     // Collect weekly blocks per day. `methods` collects codes → full names for the legend below.
     const methods = new Map<string, string>();
     const byDay = new Map<Day, EvBlock[]>();
-    for (const ps of planned) {
+    for (const ps of gridSections) {
       for (const m of ps.section.meetings) {
         if (m.method) methods.set(m.method, m.methodText || m.method);
         for (const b of meetingBlocks(m)) {
@@ -242,6 +268,8 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
             conflicted: false,
             lane: 0,
             lanes: 1,
+            booked: bookedIds.has(ps.id),
+            bookedOnly: extraIds.has(ps.id),
           });
           byDay.set(b.day, arr);
         }
@@ -282,14 +310,38 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
         const methodLoc = [m.method, m.location].filter(Boolean).join(" / ");
         const lines: HTMLElement[] = [
           h("div", { class: "tsh-ev-time", text: timeRange }),
-          h("div", { class: "tsh-ev-abbr", text: ps.course.abbr }),
+          h("div", { class: "tsh-ev-abbr", text: blk.booked ? `✓ ${ps.course.abbr}` : ps.course.abbr }),
         ];
         if (methodLoc) lines.push(h("div", { class: "tsh-ev-loc", text: methodLoc }));
         if (m.instructor) lines.push(h("div", { class: "tsh-ev-inst", text: m.instructor }));
         const ev = h("div", {
-          class: `tsh-ev${blk.conflicted ? " tsh-ev-conflict" : ""}`,
+          class: `tsh-ev${blk.conflicted ? " tsh-ev-conflict" : ""}${blk.booked ? " tsh-ev-booked" : ""}`,
+          title: blk.booked ? `Enrolled in TSS (${ps.section.eventPkgText})` : undefined,
         }, lines);
         // Switch / Drop controls, pinned to the block's bottom. Both act on the whole course.
+        // On a booked-only block (an enrollment that isn't in the plan) Drop is a REAL TSS drop.
+        const dropBtn = blk.bookedOnly
+          ? h("button", {
+              class: "tsh-ev-drop",
+              text: "Drop",
+              title: `Drop ${ps.course.abbr} from TSS (cancels your enrollment)`,
+              onClick: (event) => {
+                event.stopPropagation();
+                booking.dropTss(ps.course, ps.section);
+              },
+            })
+          : h("button", {
+              class: "tsh-ev-drop",
+              text: "Drop",
+              title: `Drop ${ps.course.abbr}`,
+              onClick: (event) => {
+                event.stopPropagation();
+                const planId = ctx.getActivePlanId();
+                if (planId && confirmDrop(ps.course.abbr)) {
+                  void dropCourse(ctx.store, planId, courseKey(ps.course));
+                }
+              },
+            });
         ev.append(
           h("div", { class: "tsh-ev-actions" }, [
             h("button", {
@@ -301,18 +353,7 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
                 ctx.showSections(ps.course);
               },
             }),
-            h("button", {
-              class: "tsh-ev-drop",
-              text: "Drop",
-              title: `Drop ${ps.course.abbr}`,
-              onClick: (event) => {
-                event.stopPropagation();
-                const planId = ctx.getActivePlanId();
-                if (planId && confirmDrop(ps.course.abbr)) {
-                  void dropCourse(ctx.store, planId, courseKey(ps.course));
-                }
-              },
-            }),
+            dropBtn,
           ]),
         );
         const widthPct = 100 / blk.lanes;
@@ -345,44 +386,126 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
       if (legend.childNodes.length > 0) wrap.append(legend);
     }
 
-    // Droppable list — one row per course (its LE/DI/LA parts collapse into a single entry).
-    if (planned.length > 0) {
+    // Course strip — one row per course (its LE/DI/LA parts collapse into a single entry).
+    // Planned courses keep plan Switch/Drop and gain a real "Book" action; live enrollments not
+    // in the plan get their own rows with a real "Drop from TSS".
+    if (planned.length > 0 || enrollments.length > 0) {
       const list = h("div", { class: "tsh-planned" });
+
+      const bookingState = (course: (typeof planned)[number]["course"]): HTMLElement[] => {
+        const bits: HTMLElement[] = [];
+        const busyLabel = booking.busy(course);
+        if (busyLabel) bits.push(h("span", { class: "tsh-book-busy", text: busyLabel }));
+        const err = booking.error(course);
+        if (err) bits.push(h("span", { class: "tsh-book-err", text: `⚠ ${err}` }));
+        return bits;
+      };
+
       for (const group of groupByCourse(planned)) {
         const conflicted = conflictedCourseKeys.has(group.key);
-        const switchBtn = h("button", {
-          class: "tsh-course-switch",
-          text: "Switch",
-          title: `Pick a different section of ${group.course.abbr}`,
-          onClick: () => ctx.showSections(group.course),
-        });
-        const drop = h("button", {
-          class: "tsh-course-drop",
-          text: "Drop",
-          title: `Drop ${group.course.abbr} (all sections)`,
-          onClick: () => {
-            const planId = ctx.getActivePlanId();
-            if (planId && confirmDrop(group.course.abbr)) {
-              void dropCourse(ctx.store, planId, group.key);
-            }
-          },
-        });
+        const rb = bookedByCourse.get(group.key);
+        const plannedSec = group.planned[0].section;
+        const sameSection = rb?.section != null && bookedIds.has(group.planned[0].id);
+
+        const cells: Array<Node | string> = [
+          h("span", { class: "tsh-planned-abbr", text: group.course.abbr }),
+          h("span", { class: "tsh-planned-name", text: group.course.title }),
+          h("span", { class: "tsh-planned-units", text: `${group.course.units}u` }),
+        ];
+        if (rb) {
+          cells.push(
+            h("span", {
+              class: "tsh-booked-badge",
+              text: sameSection ? "✓ Enrolled" : "✓ Enrolled (other section)",
+              title: rb.section
+                ? `Enrolled in ${rb.section.eventPkgText}`
+                : `Enrolled in TSS (section still being located)`,
+            }),
+          );
+        }
+        const busyLabel = booking.busy(group.course);
+        if (!rb && !busyLabel) {
+          cells.push(
+            h("button", {
+              class: "tsh-course-book",
+              text: "Book",
+              title: `Book ${plannedSec.eventPkgText} in TSS now`,
+              onClick: () => booking.book(group.course, plannedSec),
+            }),
+          );
+        }
+        cells.push(...bookingState(group.course));
+        cells.push(
+          h("button", {
+            class: "tsh-course-switch",
+            text: "Switch",
+            title: `Pick a different section of ${group.course.abbr}`,
+            onClick: () => ctx.showSections(group.course),
+          }),
+          h("button", {
+            class: "tsh-course-drop",
+            text: "Drop",
+            title: `Drop ${group.course.abbr} (all sections)`,
+            onClick: () => {
+              const planId = ctx.getActivePlanId();
+              if (planId && confirmDrop(group.course.abbr)) {
+                void dropCourse(ctx.store, planId, group.key);
+              }
+            },
+          }),
+        );
         list.append(
-          h("div", { class: `tsh-planned-row${conflicted ? " tsh-conflict" : ""}` }, [
-            h("span", { class: "tsh-planned-abbr", text: group.course.abbr }),
-            h("span", { class: "tsh-planned-name", text: group.course.title }),
-            h("span", { class: "tsh-planned-units", text: `${group.course.units}u` }),
-            switchBtn,
-            drop,
-          ]),
+          h("div", { class: `tsh-planned-row${conflicted ? " tsh-conflict" : ""}` }, cells),
         );
       }
-      wrap.append(list);
+
+      // Enrollments with no counterpart in the plan.
+      const plannedKeys = new Set(planned.map((ps) => courseKey(ps.course)));
+      for (const rb of enrollments) {
+        if (plannedKeys.has(courseKey(rb.course))) continue;
+        const cells: Array<Node | string> = [
+          h("span", { class: "tsh-planned-abbr", text: rb.course.abbr }),
+          h("span", { class: "tsh-planned-name", text: rb.course.title }),
+          h("span", { class: "tsh-planned-units", text: `${rb.course.units}u` }),
+          h("span", {
+            class: "tsh-booked-badge",
+            text: "✓ Enrolled",
+            title: rb.section
+              ? `Enrolled in ${rb.section.eventPkgText}`
+              : rb.error
+                ? `Enrolled in TSS — section lookup failed: ${rb.error}`
+                : "Enrolled in TSS — locating section…",
+          }),
+        ];
+        cells.push(...bookingState(rb.course));
+        cells.push(
+          h("button", {
+            class: "tsh-course-switch",
+            text: "Sections",
+            title: `Browse ${rb.course.abbr} sections`,
+            onClick: () => ctx.showSections(rb.course),
+          }),
+        );
+        if (rb.section && !booking.busy(rb.course)) {
+          const sec = rb.section;
+          cells.push(
+            h("button", {
+              class: "tsh-course-drop",
+              text: "Drop from TSS",
+              title: `Cancel your ${rb.course.abbr} enrollment in TSS`,
+              onClick: () => booking.dropTss(rb.course, sec),
+            }),
+          );
+        }
+        list.append(h("div", { class: "tsh-planned-row tsh-planned-row-booked" }, cells));
+      }
+
+      if (list.childNodes.length > 0) wrap.append(list);
     }
   }
 
   ctx.subscribe((reason) => {
-    if (reason === "plans") render();
+    if (reason === "plans" || reason === "bookings") render();
   });
 
   render();
@@ -466,4 +589,21 @@ export const CALENDAR_EXTRA_STYLES = `
   background: #fef2f2;
   border-color: #fca5a5;
 }
+.tsh-course-book {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid #16a34a;
+  border-radius: 6px;
+  background: #16a34a;
+  color: #fff;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tsh-course-book:hover { background: #15803d; border-color: #15803d; }
+
+/* Blocks for sections the student is actually enrolled in (TSS bookings). */
+.tsh-ev-booked { box-shadow: inset 0 0 0 2px #16a34a; }
+.tsh-planned-row-booked { background: #f0fdf4; }
 `;

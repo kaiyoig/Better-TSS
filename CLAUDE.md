@@ -41,6 +41,31 @@ Not yet exhaustively tested against a live TSS session.
   - A shared conflict list ("Conflict: A & B") tops the Calendar and List tabs.
 - **Saved plans** — multiple named plans (create/rename/delete/switch) persisted in
   `chrome.storage.local`.
+- **Booking & dropping (real TSS writes)** — from the `bookcourse.har` capture:
+  - Section cards show **"Book in TSS"** when live status says the window is open and seats are
+    free (never from catalog-snapshot data), and **"✓ Enrolled" + "Drop from TSS"** when booked.
+    Both behind an explicit `window.confirm` (these are real registrations, not plan edits).
+  - **Enrollments are an overlay on the main views** (no separate tab): the panel fetches
+    `BC_OVP_BOOKED_MODULES_SRV/ModuleSet` on mount and after every Book/Drop, resolves each row
+    to its catalog section in the background (the feed names only the course — the panel probes
+    each section's `ModuleHeaderSet` until the booking's `ModregId` matches; cached per booking),
+    and exposes them via `AppContext.getBookings()`.
+    - **Calendar**: booked sections render on the grid — merged with the planned block (green
+      ring + "✓" prefix) when that section is planned, as extra blocks when not. The course strip
+      below shows "✓ Enrolled" badges, a green **Book** button for planned-but-not-booked
+      courses, rows for booked-only courses with **Drop from TSS**, and booked-only blocks'
+      Drop is the real TSS drop.
+    - **List**: a "✓ Enrolled" flag under the course code ("✓ Enrolled*" = booked into a
+      *different* section), Status becomes "Enrolled" when the exact planned section is booked,
+      and the Action cell gains a **Book** button.
+    - Both views share `createBookingRunner` (`src/ui/bookingOps.ts`) for confirm + busy/error
+      state.
+  - Protocol: JSON POSTs to `ActionHdrSet` — Book = `CheckRegistration` then `SaveChanges`
+    (returns the real `ModregId`); Drop = one `CancelBooking`. Refusals arrive in-band as
+    `MessageType "E"/"A"` + `Message` (still HTTP 201) and surface on the card/row. The v2 service
+    has its own CSRF token (fetched from its root, cached separately). See [RECON.md](RECON.md).
+  - A `"bookings"` change reason fans out after each refresh: calendar/list re-render their
+    overlay, section cards re-poll live status.
 
 ## Architecture
 
@@ -55,8 +80,12 @@ src/storage/   planStore.ts (chrome.storage-backed PlanStore),
                cache.ts (CachedTss — built, NOT yet wired in)
 src/ui/        panel.ts (shell + tabs + AppContext + style injection),
                calendar.ts / list.ts / finals.ts / sections.ts / search.ts /
-               term.ts / plans.ts / conflicts.ts, dom.ts, styles.ts, util.ts
-src/content/   mounts the panel; toolbar-icon → toggle message listener
+               term.ts / plans.ts / conflicts.ts, bookingOps.ts (shared Book/Drop
+               runner), dom.ts, styles.ts, util.ts
+src/content/   mounts the panel; toolbar-icon → toggle message listener;
+               bridge.ts (MAIN-world fetch proxy) + bridgeClient.ts (postMessage
+               RPC) so TSS calls carry the page's exact credentials — Brave
+               doesn't attach cookies to isolated-world fetches
 src/background/ service worker; action.onClicked forwards a toggle
 public/manifest.json  MV3
 ```
@@ -88,10 +117,11 @@ changes, reload the extension AND refresh the TSS tab.
 
 ## Roadmap / known gaps
 
-- **Booking** — not implemented (planning only, by design). The booking service is now mapped
-  (v2 `PR_MY_MODULES_V2_SRV`; only `WishListSet` is client-writable, see [RECON.md](RECON.md)), but
-  the actual Book/waitlist *write* op is still uncaptured — both HARs were taken before the reg
-  window opened, so the Book button was inert. Need a HAR of a real book/waitlist/wishlist click.
+- **Waitlist/wishlist writes** — still uncaptured; "Book in TSS" only shows when open seats > 0,
+  so waitlist-only sections have no write action yet.
+- **Booking is live-tested only on the happy path** (one Drop→Book round-trip in
+  `bookcourse.har`); refusal shapes (`MessageType`) are inferred from the entity schema, not
+  observed. Verify against a prereq-blocked or full section when possible.
 - **`CachedTss` is unwired** — the UI calls `TssClient` directly. Wiring needs a small
   `CourseSource` interface (the two aren't structurally interchangeable — `TssClient` has private
   fields).

@@ -225,6 +225,13 @@ export const STYLES = `
 .tsh-live-soon { background: #fef9c3; color: #854d0e; border-color: #fde68a; }
 .tsh-live-closed { background: #f1f5f9; color: #64748b; border-color: #e2e8f0; }
 .tsh-live-wish { color: #7c3aed; font-weight: 600; }
+
+/* Real-enrollment (Book/Drop in TSS) shared bits — used by section cards, calendar, and list. */
+.tsh-book { background: #16a34a; color: #fff; border-color: #16a34a; font-weight: 600; }
+.tsh-book:hover:not(:disabled) { background: #15803d; border-color: #15803d; }
+.tsh-booked-badge { color: #166534; font-weight: 700; white-space: nowrap; }
+.tsh-book-busy { color: #64748b; font-style: italic; font-weight: 600; }
+.tsh-book-err { color: #b91c1c; font-size: 11px; font-weight: 600; white-space: normal; }
 .tsh-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: 0 0 auto; }
 .tsh-dot-green { background: #16a34a; }
 .tsh-dot-yellow { background: #eab308; }

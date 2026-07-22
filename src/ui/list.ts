@@ -1,8 +1,10 @@
 import type { Meeting } from "../api/types";
 import type { CourseGroup } from "../model/planOps";
-import { dropCourse, groupByCourse, isUnscheduled, parseFinal } from "../model/planOps";
+import { courseKey, dropCourse, groupByCourse, isUnscheduled, parseFinal } from "../model/planOps";
+import { plannedSectionId } from "../model/plan";
+import { createBookingRunner } from "./bookingOps";
 import { conflictListEl } from "./conflicts";
-import type { AppContext } from "./context";
+import type { AppContext, ResolvedBooking } from "./context";
 import { clear, h } from "./dom";
 import { confirmDrop } from "./util";
 
@@ -89,10 +91,16 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
   const wrap = h("div", { class: "tsh-list-wrap" });
   el.append(wrap);
 
+  const booking = createBookingRunner(ctx, () => render());
+
   function render(): void {
     clear(wrap);
     const plan = ctx.getActivePlan();
     const planned = plan?.sections ?? [];
+
+    // Live-enrollment overlay: flag courses the student is actually booked into.
+    const bookedByCourse = new Map<string, ResolvedBooking>();
+    for (const rb of ctx.getBookings()) bookedByCourse.set(courseKey(rb.course), rb);
     if (!plan || planned.length === 0) {
       wrap.append(
         h("div", { class: "tsh-empty", text: "No courses in this plan yet." }),
@@ -114,6 +122,11 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
       const meetings = orderMeetings(group);
       const span = Math.max(meetings.length, 1);
 
+      // Enrollment flag: is this course booked in TSS, and is it this exact section?
+      const rb = bookedByCourse.get(group.key);
+      const sameSection =
+        rb?.section != null && plannedSectionId(rb.course, rb.section) === group.planned[0].id;
+
       const switchBtn = h("button", {
         class: "tsh-btn tsh-list-switch",
         text: "Switch",
@@ -131,16 +144,47 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
         },
       });
 
+      const actionBits: Array<Node | string> = [];
+      const busyLabel = booking.busy(group.course);
+      if (!rb && !busyLabel) {
+        actionBits.push(
+          h("button", {
+            class: "tsh-btn tsh-book tsh-list-book",
+            text: "Book",
+            title: `Book ${group.planned[0].section.eventPkgText} in TSS now`,
+            onClick: () => booking.book(group.course, group.planned[0].section),
+          }),
+        );
+      }
+      if (busyLabel) actionBits.push(h("div", { class: "tsh-book-busy", text: busyLabel }));
+      actionBits.push(switchBtn, dropBtn);
+      const bookErr = booking.error(group.course);
+      if (bookErr) actionBits.push(h("div", { class: "tsh-book-err", text: `⚠ ${bookErr}` }));
+
       const rows = meetings.length > 0 ? meetings : [null];
       rows.forEach((m, idx) => {
         const tr = h("tr", { class: `tsh-list-row${idx === 0 ? " tsh-list-row-first" : ""}` });
         if (idx === 0) {
+          const courseCell = h(
+            "td",
+            { class: "tsh-list-course", attrs: { rowspan: String(span) } },
+            [group.course.abbr],
+          );
+          if (rb) {
+            courseCell.append(
+              h("span", {
+                class: "tsh-list-flag",
+                text: sameSection ? "✓ Enrolled" : "✓ Enrolled*",
+                title: sameSection
+                  ? "You are enrolled in this section in TSS"
+                  : rb.section
+                    ? `Enrolled in TSS, but in a different section (${rb.section.eventPkgText})`
+                    : "Enrolled in TSS (section still being located)",
+              }),
+            );
+          }
           tr.append(
-            h("td", {
-              class: "tsh-list-course",
-              text: group.course.abbr,
-              attrs: { rowspan: String(span) },
-            }),
+            courseCell,
             h("td", {
               class: "tsh-list-title",
               text: group.course.title,
@@ -162,14 +206,15 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
               attrs: { rowspan: String(span) },
             }),
             h("td", {
-              class: "tsh-list-status",
-              text: "Planned",
+              class: `tsh-list-status${sameSection ? " tsh-list-status-enrolled" : ""}`,
+              text: sameSection ? "Enrolled" : "Planned",
               attrs: { rowspan: String(span) },
             }),
-            h("td", { class: "tsh-list-action", attrs: { rowspan: String(span) } }, [
-              switchBtn,
-              dropBtn,
-            ]),
+            h(
+              "td",
+              { class: "tsh-list-action", attrs: { rowspan: String(span) } },
+              actionBits,
+            ),
           );
         }
         body.append(tr);
@@ -184,7 +229,7 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
   }
 
   ctx.subscribe((reason) => {
-    if (reason === "plans") render();
+    if (reason === "plans" || reason === "bookings") render();
   });
 
   render();
@@ -253,6 +298,21 @@ export const LIST_STYLES = `
   margin-right: 6px;
 }
 .tsh-list-drop {
+  white-space: nowrap;
+}
+.tsh-list-book {
+  margin-right: 6px;
+}
+.tsh-list-status-enrolled {
+  color: #166534;
+}
+/* Enrollment flag under the course code ("✓ Enrolled"; * = a different section is booked). */
+.tsh-list-flag {
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #166534;
   white-space: nowrap;
 }
 `;

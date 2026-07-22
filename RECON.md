@@ -80,8 +80,18 @@ Flat parent/child tree (classifications, majors, course requirements).
 Academic-year and academic-period lists that populate the `AcYearText` / `AcademicPeriodText`
 filter dropdowns. (`AcademicPeriod='2'` = Fall Quarter in the samples.)
 
-### Current enrollment — `BC_OVP_BOOKED_MODULES_SRV/ModuleSet`
-Separate OVP service; lists already-booked modules. Useful to gray out / dedupe planned courses.
+### Current enrollment — `BC_OVP_BOOKED_MODULES_SRV/ModuleSet` (confirmed, `bookcourse.har`)
+Separate OVP service (note the **lowercase** path segment the live UI uses):
+```
+GET /sap/opu/odata/ited/BC_OVP_BOOKED_MODULES_SRV/ModuleSet    (no params; plain JSON GET, no CSRF)
+```
+One row per live enrollment, scoped to the session's student. Fields: `ModregId` (booking guid,
+the entity key), `SmObjid` (padded module ID), `SmShort` ("MUS-008"), `SmStext` (title),
+`Credits`/`CreditUnit`, `AcademicYear(+Text)`, `AcademicSession(+Text)`, `ScObjid` (program),
+`AssignedCg`/`AssignedCgTop`, `ConditionalBooking`. **No EventPackageId** — the row names the
+course, not the section; matching a booking to its section takes a catalog `_sections` read plus
+per-section `ModuleHeaderSet` probes (the booked one echoes the same `ModregId`). Wired in as
+`TssClient.listBookings` + `locateBookedSection`.
 
 ## Booking service — `PR_MY_MODULES_V2_SRV` (from `tss.ucsd.edu.2.har`)
 The booking **detail page** runs on a *different* service from the catalog — OData **v2**, not v4:
@@ -102,10 +112,43 @@ Live values seen for CSE-103 (module 8754):
 `ModregId=0000…` (not booked), `SmStatus='00'` ("Waitlist Inactive"), `OnWishList=False`,
 `OpenSeats=192`, `RegistrationBeginDate=2026-07-22`, `RegistrationEndDate=2026-12-04`.
 
-### Why the Book write STILL isn't captured
-The capture was taken **2026-07-21, before `RegistrationBeginDate` (07-22)** — the window wasn't
-open, so the Book button was inert. No POST/MERGE/PUT changeset appears anywhere in this HAR.
-**Next capture:** a HAR taken *after* the window opens, clicking Book / Add-to-Waitlist.
+### The Book write — CAPTURED (`tss.ucsd.edu.3.har`; full Drop→Book round-trip in `bookcourse.har`)
+The booking write is **not** an OData changeset on `ModuleRegistrationSet` — it's plain JSON POSTs
+to **`ActionHdrSet`** (`Content-Type: application/json`, `X-CSRF-Token` required, each returns 201):
+
+```
+POST /sap/opu/odata/ITUS/PR_MY_MODULES_V2_SRV/ActionHdrSet?sap-client=500
+{"ModuleId":"00008366","ActionName":"CheckRegistration","ProgramId":"00000257",
+ "Items":[{"EventId":"00001988","ModuleId":"00008366","AcademicYear":"2026",
+           "AcademicSession":"002","EventPackId":"154244"}, ...one per event in the section],
+ "AssignedCg":"00000492","AssignedCgTop":"00000492","TemplateId":"0001",
+ "EventPackId":"154244","ModregId":"00000000-0000-0000-0000-000000000000",
+ "AcademicYear":"2026","AcademicSession":"002","Credits":"4.00","CreditUnit":"CRH"}
+```
+
+- **Book** = `ActionName:"CheckRegistration"` (rule/prereq check, ~1s) then the identical body with
+  `ActionName:"SaveChanges"` → response carries the **real `ModregId` guid** (booking created).
+- **Drop** = same body with `ActionName:"CancelBooking"` — a single POST, no check step, and sent
+  with the **zeros guid** even though a real booking exists (confirmed in `bookcourse.har`).
+- All three return **201** even as a protocol matter; business-rule refusals come back **in-band**
+  on the echoed entity as `MessageType` (`"E"`/`"A"`) + `Message`. Success has `MessageType:""`.
+- `ProgramId` = the student's `ScObjid` (here `00000257`), `AssignedCg`/`AssignedCgTop` = college
+  group. **All of these — plus `TemplateId`, `Credits`, `CreditUnit` — are echoed by the
+  program-agnostic `ModuleHeaderSet` read** (`ScObjid='00000000'`, zeros guid): despite the zeros
+  key, the response is student-aware (`bookcourse.har` entry 2). One extra read, zero new lookups.
+  Caveat: pre-booking, that read reports `AssignedCgTop:"00000000"` while the UI POSTs the real
+  group — mirror `AssignedCg` when the top is zeros.
+- Per-event `EventId`s for `Items[]` come from the `ModuleHeaderSet(...)/Event` nav (also returns
+  full structured schedules via `EventSchedule`, an alternative to `Sched`-string parsing).
+- `ModuleId`/`EventId` are zero-padded to 8 digits; `AcademicSession` is the padded `'002'` form;
+  `EventPackId` is the **unpadded** catalog `EventPkgObjid` (`"154244"`).
+- Headers: `Content-Type: application/json`, `dataserviceversion: 2.0`, `X-CSRF-Token` fetched
+  from the **v2 service root** (separate token from the catalog's), plus the usual
+  `x-xhr-logon: accept="iframe,strict-window,window"` and `X-Requested-With: XMLHttpRequest`
+  (SAP XHR-Logon protocol — see SSO note below).
+- Post-booking, the program-agnostic header read flips to `SmStatus:"01"` / `SmStatusText:"Booked"`
+  and carries the real `ModregId` — a per-section "am I enrolled?" probe.
+- Wired in as `TssClient.bookSection` / `dropSection` (UI: section cards, calendar, list).
 
 ### Writable now: `WishListSet`
 Of all 31 entity sets, SAP's `sap:creatable/updatable/deletable` flags mark **only `WishListSet`
@@ -136,11 +179,17 @@ Other enrollment-relevant sets (all read-only here, likely populated during a bo
 (`ActionName`,`Cancel`,`ModregId`,`TemplateId` — the submit-book/cancel payload shape),
 `RequestSet` (messages).
 
+## SSO interception (why "No CSRF token" happens)
+When the SAP backend session is missing/expired, *any* request to `tss.ucsd.edu/sap/...` returns
+**HTTP 200 `text/html`** — an auto-submitting SAML form to `https://tssproxy.ucsd.edu/idp/profile/
+SAML2/POST/SSO` — instead of an OData response. An XHR can't execute that page, so the CSRF
+handshake sees "200 but no `x-csrf-token` header". The Fiori UI recovers via SAP's **XHR-Logon**
+protocol (it advertises `x-xhr-logon: accept="iframe,strict-window,window"`); `TssClient` now
+detects the SAML page and re-runs SSO in a hidden same-origin iframe, then retries.
+
 ## Gaps / next capture
-- **Booking action** — the actual write op is still unmapped (reg window opened the day after
-  capture, 2026-07-22). Need a HAR of a real Book / waitlist / add-to-wishlist click. Until then,
-  "assisted booking" = deep-link/hand off into TSS's own booking UI. Buildable now from the above:
-  a real `WishListSet` write, and live seat/waitlist/registration-window status per section.
+- **Waitlist & wishlist writes** — Book/Cancel are mapped (above), but an Add-to-Waitlist click
+  and a real `WishListSet` write are still uncaptured.
 - **Term codes** — confirm the full `AcademicPeriod` ↔ quarter mapping (1=?, 2=Fall, 3=?…).
 - **Rate limits / anti-automation** on repeated section polling — unknown; poll conservatively.
 

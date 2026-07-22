@@ -11,3 +11,17 @@ export function errorMessage(err: unknown): string {
 export function confirmDrop(courseLabel: string): boolean {
   return window.confirm(`Drop ${courseLabel} from your schedule?`);
 }
+
+/** Confirm a REAL TSS enrollment before submitting it. */
+export function confirmBook(sectionLabel: string): boolean {
+  return window.confirm(
+    `Book ${sectionLabel} in TSS now?\n\nThis submits a real registration to UCSD — it is not part of the local plan.`,
+  );
+}
+
+/** Confirm a REAL TSS deregistration before submitting it. */
+export function confirmTssDrop(courseLabel: string): boolean {
+  return window.confirm(
+    `Drop ${courseLabel} from TSS?\n\nThis cancels your actual enrollment at UCSD, not just the local plan.`,
+  );
+}

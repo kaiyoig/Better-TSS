@@ -1,9 +1,10 @@
 import type { TssClient } from "../api/tss";
-import type { CourseSummary, Term } from "../api/types";
+import type { CourseSummary, Section, Term } from "../api/types";
 import type { Plan, PlanStore } from "../model/plan";
 import { CALENDAR_EXTRA_STYLES, createCalendar } from "./calendar";
 import { CONFLICT_STYLES } from "./conflicts";
-import type { AppContext, ChangeReason } from "./context";
+import type { AppContext, ChangeReason, ResolvedBooking } from "./context";
+import { errorMessage } from "./util";
 import { h } from "./dom";
 import { FINALS_STYLES, createFinals } from "./finals";
 import { LIST_STYLES, createList } from "./list";
@@ -74,6 +75,69 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
     for (const l of listeners) l(reason);
   };
 
+  // ---- live enrollments ----
+  // Fetched once on mount and re-fetched after every Book/Drop. The booked-modules feed names
+  // only the course, so each row is then resolved to its catalog section (a sections read +
+  // per-section live-status probes) for calendar placement; resolutions are cached by booking id.
+  let bookings: ResolvedBooking[] = [];
+  const locatedSections = new Map<string, Section>(); // ModregId → located section
+  let bookingsRefreshing = false;
+  let bookingsRefreshQueued = false;
+
+  async function refreshBookings(): Promise<void> {
+    if (bookingsRefreshing) {
+      // A Book/Drop landed mid-refresh — run once more when this pass finishes.
+      bookingsRefreshQueued = true;
+      return;
+    }
+    bookingsRefreshing = true;
+    try {
+      const rows = await client.listBookings();
+      bookings = rows.map((b) => ({
+        booking: b,
+        course: {
+          year: b.year,
+          period: b.period,
+          moduleID: b.moduleID,
+          dept: b.abbr.split("-")[0] ?? b.abbr,
+          abbr: b.abbr,
+          title: b.title,
+          units: b.units,
+          level: "",
+        },
+        section: locatedSections.get(b.modregId) ?? null,
+        pending: !locatedSections.has(b.modregId),
+      }));
+      emit("bookings");
+
+      const unresolved = bookings.filter((rb) => rb.pending);
+      await Promise.all(
+        unresolved.map(async (rb) => {
+          try {
+            const { section } = await client.locateBookedSection(rb.booking);
+            locatedSections.set(rb.booking.modregId, section);
+            rb.section = section;
+          } catch (err) {
+            rb.error = errorMessage(err);
+          }
+          rb.pending = false;
+        }),
+      );
+      // One emit for the whole resolution round — subscribers (sections view) re-poll live
+      // status on each "bookings", so per-row emits would fan out into redundant request sweeps.
+      if (unresolved.length > 0) emit("bookings");
+    } catch {
+      // Enrollments are an overlay — if the feed fails (expired session, service hiccup) the
+      // planner still works, so fail silent and keep whatever we showed last.
+    } finally {
+      bookingsRefreshing = false;
+      if (bookingsRefreshQueued) {
+        bookingsRefreshQueued = false;
+        void refreshBookings();
+      }
+    }
+  }
+
   // Late-bound: `sections` is created below, after ctx. Reassigned once it exists.
   let showSectionsImpl: (course: CourseSummary) => void = () => {};
 
@@ -89,6 +153,8 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
     getActivePlanId: () => activePlanId,
     getActivePlan: () => plans.find((p) => p.id === activePlanId) ?? null,
     showSections: (course) => showSectionsImpl(course),
+    notifyBookingsChanged: () => void refreshBookings(),
+    getBookings: () => bookings,
     subscribe: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -220,6 +286,7 @@ export function mountPanel(client: TssClient, store: PlanStore): PanelHandle {
   });
 
   // ---- initial load ----
+  void refreshBookings(); // enrollments overlay: fetch + resolve in the background
   void (async () => {
     await reload();
     if (plans.length === 0) {
