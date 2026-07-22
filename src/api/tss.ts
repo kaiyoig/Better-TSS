@@ -83,6 +83,22 @@ export class TssClient {
   private csrfToken: string | null = null;
   /** CSRF token for the v2 booking service — a separate security context from the catalog's. */
   private csrfTokenV2: string | null = null;
+  /**
+   * The student's own program identity (`ScObjid` + college group), learned opportunistically
+   * from booked-modules rows and header reads. Used for the student-keyed `ModuleHeaderSet`
+   * fallback when the program-agnostic key stops resolving (observed live: after repeated
+   * drop→rebook cycles on one section the `ScObjid='00000000'` read starts 404ing).
+   */
+  private program: { scObjid: string; assignedCg: string; assignedCgTop: string } | null = null;
+
+  private noteProgram(scObjid?: string, cg?: string, cgTop?: string): void {
+    if (!scObjid || scObjid === "00000000") return;
+    this.program = {
+      scObjid,
+      assignedCg: cg && cg !== "00000000" ? cg : (this.program?.assignedCg ?? ""),
+      assignedCgTop: cgTop && cgTop !== "00000000" ? cgTop : (this.program?.assignedCgTop ?? ""),
+    };
+  }
 
   constructor(
     private readonly doFetch: FetchLike = (url, init) => fetch(url, init),
@@ -294,10 +310,19 @@ export class TssClient {
     const res = await this.doFetch(url, {
       method: "GET",
       credentials: "include",
-      headers: { Accept: "application/json", ...UI_XHR_HEADERS },
+      headers: {
+        Accept: "application/json",
+        dataserviceversion: "2.0",
+        maxdataserviceversion: "2.0",
+        ...UI_XHR_HEADERS,
+      },
     });
     if (!res.ok) {
-      throw new TssError(`${what} request failed (${res.status})`, await safeText(res));
+      const body = await safeText(res);
+      // Keep the exact failing URL in the console — v2 key-resolution failures (404s) are
+      // impossible to diagnose from the short user-facing message alone.
+      console.warn(`[Better TSS] ${what} request failed (${res.status})`, url, body);
+      throw new TssError(`${what} request failed (${res.status})`, `${url} → ${body}`, res.status);
     }
     if ((res.headers.get("content-type") ?? "").includes("text/html")) {
       throw new TssError("TSS session expired — reload the TSS page and retry.");
@@ -309,28 +334,89 @@ export class TssClient {
    * The program-agnostic `ModuleHeaderSet` key for a section (`ScObjid='00000000'` + zeros guid).
    * Despite the zeros, the response is student-aware: it echoes back the real program (`ScObjid`),
    * college group, grading template, and — once enrolled — the real `ModregId` + "Booked" status.
+   * The live UI sends the *unpadded* id forms (bookcourse.har); `padded` builds the canonical
+   * zero-padded form the server's own `__metadata` echoes, used as a retry when unpadded 404s.
    */
-  private moduleHeaderUrl(course: CourseRef, section: Pick<Section, "pkgObjid">): string {
+  private moduleHeaderUrl(
+    course: CourseRef,
+    section: Pick<Section, "pkgObjid">,
+    padded = false,
+    scObjid = "00000000",
+  ): string {
+    const mod = padded ? pad(course.moduleID, 8) : trimZeros(course.moduleID);
+    const pkg = padded ? pad(section.pkgObjid, 8) : trimZeros(section.pkgObjid);
+    const ses = padded ? pad(course.period, 3) : trimZeros(course.period);
     const key =
-      `SmObjid='${course.moduleID}',SmOtype='SM',ScObjid='00000000',` +
+      `SmObjid='${mod}',SmOtype='SM',ScObjid='${scObjid}',` +
       `ModregId=guid'${ZERO_GUID}',` +
-      `EventPackageId='${section.pkgObjid}',AcademicYear='${course.year}',` +
-      `AcademicSession='${course.period}'`;
+      `EventPackageId='${pkg}',AcademicYear='${course.year}',` +
+      `AcademicSession='${ses}'`;
     return `${MODULES_V2_ROOT}ModuleHeaderSet(${key})`;
+  }
+
+  /**
+   * GET `ModuleHeaderSet(<key>)<nav>?…<query>`, walking through every key form the live UI is
+   * seen using until one resolves: program-agnostic (`ScObjid='00000000'`) unpadded then padded
+   * (SAP conversion exits resolve unpadded keys inconsistently), then the student-keyed form
+   * when the program is known.
+   *
+   * IMPORTANT (learned live, tss.ucsd.edu.4.har): callers must pass an `$expand` in `query`.
+   * The Fiori UI never issues a *bare* entity GET on this set, and once the student has a
+   * cancelled registration row for a section the bare read starts 404ing
+   * (`Resource not found for segment 'ModuleHeader'`) while the $expand form — a different
+   * Gateway handler (GET_EXPANDED_ENTITY) — keeps returning 200 for the very same key.
+   */
+  private async readModuleEntity<T>(
+    course: CourseRef,
+    section: Pick<Section, "pkgObjid">,
+    nav: string,
+    query: string,
+    what: string,
+  ): Promise<T> {
+    if (!section.pkgObjid) {
+      throw new TssError("Section is missing its EventPackage ID — cannot query booking service.");
+    }
+    const keyUrls = [
+      this.moduleHeaderUrl(course, section),
+      this.moduleHeaderUrl(course, section, true),
+    ];
+    if (this.program) {
+      keyUrls.push(
+        this.moduleHeaderUrl(course, section, false, this.program.scObjid),
+        this.moduleHeaderUrl(course, section, true, this.program.scObjid),
+      );
+    }
+    let last404: TssError | null = null;
+    for (const base of keyUrls) {
+      try {
+        return await this.v2Get<T>(`${base}${nav}?sap-client=${SAP_CLIENT}${query}`, what);
+      } catch (err) {
+        if (!(err instanceof TssError) || err.status !== 404) throw err;
+        last404 = err;
+      }
+    }
+    throw new TssError(
+      `TSS's booking service has no record of this section (404). Registration may not be ` +
+        `open for this term yet — check the section's live status in the sections browser.`,
+      last404?.detail,
+      404,
+    );
   }
 
   private async readModuleHeader(
     course: CourseRef,
     section: Pick<Section, "pkgObjid">,
   ): Promise<RawModuleHeader> {
-    if (!section.pkgObjid) {
-      throw new TssError("Section is missing its EventPackage ID — cannot query booking service.");
-    }
-    const json = await this.v2Get<{ d?: RawModuleHeader }>(
-      `${this.moduleHeaderUrl(course, section)}?sap-client=${SAP_CLIENT}`,
+    const json = await this.readModuleEntity<{ d?: RawModuleHeader }>(
+      course,
+      section,
+      "",
+      // The UI's own pre-book read (a bare read would 404 post-cancel — see readModuleEntity).
+      "&$expand=BookingCheckLog,CreditOptions",
       "Live status",
     );
     if (!json.d) throw new TssError("Live status response had no data.");
+    this.noteProgram(json.d.ScObjid, json.d.AssignedCg, json.d.AssignedCgTop);
     return json.d;
   }
 
@@ -351,10 +437,28 @@ export class TssClient {
     course: CourseRef,
     section: Pick<Section, "pkgObjid">,
   ): Promise<RawBookingEvent[]> {
-    const json = await this.v2Get<{ d?: { results?: RawBookingEvent[] } }>(
-      `${this.moduleHeaderUrl(course, section)}/Event?sap-client=${SAP_CLIENT}`,
-      "Section events",
-    );
+    let json: { d?: { results?: RawBookingEvent[] } };
+    try {
+      json = await this.readModuleEntity<{ d?: { results?: RawBookingEvent[] } }>(
+        course,
+        section,
+        "/Event",
+        // Mirror the UI's exact event read (see readModuleEntity on why $expand is load-bearing).
+        "&$expand=BookingCheckLog,Request,EventSchedule,CreditOptions",
+        "Section events",
+      );
+    } catch (err) {
+      if (!(err instanceof TssError) || err.status !== 404) throw err;
+      // Independent fallback path: the same events hang off EventPackageSet (whose key form —
+      // padded AcademicSession, no ScObjid/ModregId — resolves separately from ModuleHeaderSet).
+      const key =
+        `EventPackageId='${trimZeros(section.pkgObjid)}',SmObjid='${trimZeros(course.moduleID)}',` +
+        `AcademicYear='${course.year}',AcademicSession='${pad(course.period, 3)}'`;
+      json = await this.v2Get<{ d?: { results?: RawBookingEvent[] } }>(
+        `${MODULES_V2_ROOT}EventPackageSet(${key})/Events?sap-client=${SAP_CLIENT}`,
+        "Section events (package)",
+      );
+    }
     const events = json.d?.results ?? [];
     if (events.length === 0) {
       throw new TssError("TSS returned no events for this section — cannot build booking request.");
@@ -425,7 +529,12 @@ export class TssClient {
         continue;
       }
       if (!res.ok) {
-        throw new TssError(`TSS rejected the ${actionLabel(action)} request (${res.status}).`, text.slice(0, 400));
+        console.warn(`[Better TSS] ${actionLabel(action)} POST failed (${res.status})`, text.slice(0, 400));
+        throw new TssError(
+          `TSS rejected the ${actionLabel(action)} request (${res.status}).`,
+          text.slice(0, 400),
+          res.status,
+        );
       }
       const parsed = JSON.parse(text) as { d?: RawActionResult };
       if (!parsed.d) throw new TssError(`Empty response to ${actionLabel(action)}.`, text.slice(0, 400));
@@ -477,7 +586,11 @@ export class TssClient {
       `${BOOKED_MODULES_ROOT}ModuleSet`,
       "Booked modules",
     );
-    return (json.d?.results ?? []).map(mapBooking);
+    const rows = json.d?.results ?? [];
+    // Every row names the student's own program + college group — remember them for the
+    // student-keyed ModuleHeaderSet fallback.
+    for (const r of rows) this.noteProgram(r.ScObjid, r.AssignedCg, r.AssignedCgTop);
+    return rows.map(mapBooking);
   }
 
   /**
@@ -736,6 +849,8 @@ export class TssError extends Error {
   constructor(
     message: string,
     public detail?: string,
+    /** HTTP status when the failure was an HTTP-level rejection (e.g. 404 key resolution). */
+    public status?: number,
   ) {
     super(message);
     this.name = "TssError";

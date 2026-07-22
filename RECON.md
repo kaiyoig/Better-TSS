@@ -149,6 +149,18 @@ POST /sap/opu/odata/ITUS/PR_MY_MODULES_V2_SRV/ActionHdrSet?sap-client=500
 - Post-booking, the program-agnostic header read flips to `SmStatus:"01"` / `SmStatusText:"Booked"`
   and carries the real `ModregId` — a per-section "am I enrolled?" probe.
 - Wired in as `TssClient.bookSection` / `dropSection` (UI: section cards, calendar, list).
+- **`$expand` is load-bearing on `ModuleHeaderSet` (confirmed live 2026-07-22,
+  `tss.ucsd.edu.4.har`):** a *bare* entity GET (no `$expand`) starts 404ing
+  (`/IWBEP/CM_MGW_RT/020 — Resource not found for segment 'ModuleHeader'`) for a section once
+  the student has a cancelled registration row on it, while the **same key** with
+  `$expand=BookingCheckLog,CreditOptions` keeps returning 200 (different Gateway handler:
+  GET_EXPANDED_ENTITY vs GET_ENTITY). The Fiori UI never issues a bare read — every
+  `ModuleHeaderSet` GET carries a nav suffix or an `$expand`. `TssClient` mirrors the UI's exact
+  reads (`?$expand=BookingCheckLog,CreditOptions` for the header,
+  `/Event?$expand=BookingCheckLog,Request,EventSchedule,CreditOptions` for events) and also
+  walks fallback key forms (agnostic unpadded → padded → student-keyed `ScObjid='<program>'`,
+  learned from booked-modules rows), with `EventPackageSet(...)/Events` as an independent
+  events path.
 
 ### Writable now: `WishListSet`
 Of all 31 entity sets, SAP's `sap:creatable/updatable/deletable` flags mark **only `WishListSet`

@@ -146,18 +146,34 @@ export function createList(ctx: AppContext): { el: HTMLElement } {
 
       const actionBits: Array<Node | string> = [];
       const busyLabel = booking.busy(group.course);
-      if (!rb && !busyLabel) {
-        actionBits.push(
-          h("button", {
-            class: "tsh-btn tsh-book tsh-list-book",
-            text: "Book",
-            title: `Book ${group.planned[0].section.eventPkgText} in TSS now`,
-            onClick: () => booking.book(group.course, group.planned[0].section),
-          }),
-        );
-      }
       if (busyLabel) actionBits.push(h("div", { class: "tsh-book-busy", text: busyLabel }));
-      actionBits.push(switchBtn, dropBtn);
+      if (rb) {
+        // Enrolled: one action — a real TSS drop that also removes the course from the plan.
+        // No Switch/Book/plan-Drop on live enrollments.
+        const enrolledSec = rb.section;
+        if (enrolledSec && !busyLabel) {
+          actionBits.push(
+            h("button", {
+              class: "tsh-btn tsh-btn-danger tsh-list-drop",
+              text: "Drop from TSS",
+              title: `Cancel your ${group.course.abbr} enrollment — also removes it from this plan`,
+              onClick: () => booking.dropTss(rb.course, enrolledSec),
+            }),
+          );
+        }
+      } else {
+        if (!busyLabel) {
+          actionBits.push(
+            h("button", {
+              class: "tsh-btn tsh-book tsh-list-book",
+              text: "Book",
+              title: `Book ${group.planned[0].section.eventPkgText} in TSS now`,
+              onClick: () => booking.book(group.course, group.planned[0].section),
+            }),
+          );
+        }
+        actionBits.push(switchBtn, dropBtn);
+      }
       const bookErr = booking.error(group.course);
       if (bookErr) actionBits.push(h("div", { class: "tsh-book-err", text: `⚠ ${bookErr}` }));
 

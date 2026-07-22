@@ -27,10 +27,8 @@ interface EvBlock {
   conflicted: boolean;
   lane: number;
   lanes: number;
-  /** The student is enrolled in this section in TSS. */
+  /** The student is enrolled in this section in TSS (its Drop is a real TSS drop). */
   booked: boolean;
-  /** Booked but not in the plan — shown as an overlay; its Drop is a real TSS drop. */
-  bookedOnly: boolean;
 }
 
 /**
@@ -89,23 +87,10 @@ const DAY_LABEL: Record<Day, string> = {
   Sa: "Sat",
 };
 
-// Muted, readable block colors keyed off a course's moduleID.
-const PALETTE = [
-  "#bfdbfe",
-  "#bbf7d0",
-  "#fde68a",
-  "#fbcfe8",
-  "#c7d2fe",
-  "#a7f3d0",
-  "#fecaca",
-  "#ddd6fe",
-];
-
-function colorFor(key: string): string {
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) hash = (hash * 31 + key.charCodeAt(i)) >>> 0;
-  return PALETTE[hash % PALETTE.length];
-}
+// Block colors encode state, not identity: planned-only courses are blue, live TSS enrollments
+// are green (matching the ✓ badges elsewhere).
+const PLANNED_COLOR = "#bfdbfe";
+const ENROLLED_COLOR = "#bbf7d0";
 
 function fmtMinutes(min: number): string {
   const h24 = Math.floor(min / 60);
@@ -144,7 +129,6 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
         bookedExtras.push({ id, course: rb.course, section: rb.section, addedAt: 0 });
       }
     }
-    const extraIds = new Set(bookedExtras.map((ps) => ps.id));
     const gridSections = [...planned, ...bookedExtras];
 
     // Total units over unique courses (a course's LE + DI count once).
@@ -269,7 +253,6 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
             lane: 0,
             lanes: 1,
             booked: bookedIds.has(ps.id),
-            bookedOnly: extraIds.has(ps.id),
           });
           byDay.set(b.day, arr);
         }
@@ -318,44 +301,54 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
           class: `tsh-ev${blk.conflicted ? " tsh-ev-conflict" : ""}${blk.booked ? " tsh-ev-booked" : ""}`,
           title: blk.booked ? `Enrolled in TSS (${ps.section.eventPkgText})` : undefined,
         }, lines);
-        // Switch / Drop controls, pinned to the block's bottom. Both act on the whole course.
-        // On a booked-only block (an enrollment that isn't in the plan) Drop is a REAL TSS drop.
-        const dropBtn = blk.bookedOnly
-          ? h("button", {
-              class: "tsh-ev-drop",
-              text: "Drop",
-              title: `Drop ${ps.course.abbr} from TSS (cancels your enrollment)`,
-              onClick: (event) => {
-                event.stopPropagation();
-                booking.dropTss(ps.course, ps.section);
-              },
-            })
-          : h("button", {
-              class: "tsh-ev-drop",
-              text: "Drop",
-              title: `Drop ${ps.course.abbr}`,
-              onClick: (event) => {
-                event.stopPropagation();
-                const planId = ctx.getActivePlanId();
-                if (planId && confirmDrop(ps.course.abbr)) {
-                  void dropCourse(ctx.store, planId, courseKey(ps.course));
-                }
-              },
-            });
-        ev.append(
-          h("div", { class: "tsh-ev-actions" }, [
-            h("button", {
-              class: "tsh-ev-switch",
-              text: "Switch",
-              title: `Switch section of ${ps.course.abbr}`,
-              onClick: (event) => {
-                event.stopPropagation();
-                ctx.showSections(ps.course);
-              },
-            }),
-            dropBtn,
-          ]),
-        );
+        // Controls pinned to the block's bottom; all act on the whole course. An enrolled block
+        // offers exactly one action — Drop, a REAL TSS drop that also removes the course from the
+        // plan (no Switch/Book on live enrollments). A planned block gets Book / Switch / Drop.
+        const actions = blk.booked
+          ? [
+              h("button", {
+                class: "tsh-ev-drop",
+                text: "Drop",
+                title: `Drop ${ps.course.abbr} from TSS — also removes it from this plan`,
+                onClick: (event) => {
+                  event.stopPropagation();
+                  booking.dropTss(ps.course, ps.section);
+                },
+              }),
+            ]
+          : [
+              h("button", {
+                class: "tsh-ev-book",
+                text: "Book",
+                title: `Book ${ps.section.eventPkgText} in TSS now`,
+                onClick: (event) => {
+                  event.stopPropagation();
+                  booking.book(ps.course, ps.section);
+                },
+              }),
+              h("button", {
+                class: "tsh-ev-switch",
+                text: "Switch",
+                title: `Switch section of ${ps.course.abbr}`,
+                onClick: (event) => {
+                  event.stopPropagation();
+                  ctx.showSections(ps.course);
+                },
+              }),
+              h("button", {
+                class: "tsh-ev-drop",
+                text: "Drop",
+                title: `Drop ${ps.course.abbr}`,
+                onClick: (event) => {
+                  event.stopPropagation();
+                  const planId = ctx.getActivePlanId();
+                  if (planId && confirmDrop(ps.course.abbr)) {
+                    void dropCourse(ctx.store, planId, courseKey(ps.course));
+                  }
+                },
+              }),
+            ];
+        ev.append(h("div", { class: "tsh-ev-actions" }, actions));
         const widthPct = 100 / blk.lanes;
         const leftPct = blk.lane * widthPct;
         ev.style.left = `calc(${leftPct}% + 1px)`;
@@ -363,7 +356,7 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
         ev.style.right = "auto";
         ev.style.top = `${top}px`;
         ev.style.height = `${height}px`;
-        ev.style.background = colorFor(ps.course.moduleID);
+        ev.style.background = blk.booked ? ENROLLED_COLOR : PLANNED_COLOR;
         col.append(ev);
       }
     }
@@ -424,36 +417,52 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
           );
         }
         const busyLabel = booking.busy(group.course);
-        if (!rb && !busyLabel) {
+        cells.push(...bookingState(group.course));
+        if (rb) {
+          // Enrolled: the only action is a real TSS drop (which also clears the plan entry).
+          // No Switch/Book on live enrollments.
+          const enrolledSec = rb.section;
+          if (enrolledSec && !busyLabel) {
+            cells.push(
+              h("button", {
+                class: "tsh-course-drop",
+                text: "Drop from TSS",
+                title: `Cancel your ${group.course.abbr} enrollment — also removes it from this plan`,
+                onClick: () => booking.dropTss(rb.course, enrolledSec),
+              }),
+            );
+          }
+        } else {
+          if (!busyLabel) {
+            cells.push(
+              h("button", {
+                class: "tsh-course-book",
+                text: "Book",
+                title: `Book ${plannedSec.eventPkgText} in TSS now`,
+                onClick: () => booking.book(group.course, plannedSec),
+              }),
+            );
+          }
           cells.push(
             h("button", {
-              class: "tsh-course-book",
-              text: "Book",
-              title: `Book ${plannedSec.eventPkgText} in TSS now`,
-              onClick: () => booking.book(group.course, plannedSec),
+              class: "tsh-course-switch",
+              text: "Switch",
+              title: `Pick a different section of ${group.course.abbr}`,
+              onClick: () => ctx.showSections(group.course),
+            }),
+            h("button", {
+              class: "tsh-course-drop",
+              text: "Drop",
+              title: `Drop ${group.course.abbr} (all sections)`,
+              onClick: () => {
+                const planId = ctx.getActivePlanId();
+                if (planId && confirmDrop(group.course.abbr)) {
+                  void dropCourse(ctx.store, planId, group.key);
+                }
+              },
             }),
           );
         }
-        cells.push(...bookingState(group.course));
-        cells.push(
-          h("button", {
-            class: "tsh-course-switch",
-            text: "Switch",
-            title: `Pick a different section of ${group.course.abbr}`,
-            onClick: () => ctx.showSections(group.course),
-          }),
-          h("button", {
-            class: "tsh-course-drop",
-            text: "Drop",
-            title: `Drop ${group.course.abbr} (all sections)`,
-            onClick: () => {
-              const planId = ctx.getActivePlanId();
-              if (planId && confirmDrop(group.course.abbr)) {
-                void dropCourse(ctx.store, planId, group.key);
-              }
-            },
-          }),
-        );
         list.append(
           h("div", { class: `tsh-planned-row${conflicted ? " tsh-conflict" : ""}` }, cells),
         );
@@ -478,14 +487,6 @@ export function createCalendar(ctx: AppContext): { el: HTMLElement } {
           }),
         ];
         cells.push(...bookingState(rb.course));
-        cells.push(
-          h("button", {
-            class: "tsh-course-switch",
-            text: "Sections",
-            title: `Browse ${rb.course.abbr} sections`,
-            onClick: () => ctx.showSections(rb.course),
-          }),
-        );
         if (rb.section && !booking.busy(rb.course)) {
           const sec = rb.section;
           cells.push(
@@ -525,6 +526,7 @@ export const CALENDAR_EXTRA_STYLES = `
   display: flex;
   gap: 3px;
 }
+.tsh-ev-book,
 .tsh-ev-switch,
 .tsh-ev-drop {
   flex: 1 1 0;
@@ -539,6 +541,8 @@ export const CALENDAR_EXTRA_STYLES = `
   cursor: pointer;
   box-sizing: border-box;
 }
+.tsh-ev-book { border: 1px solid #16a34a; color: #15803d; }
+.tsh-ev-book:hover { background: #f0fdf4; }
 .tsh-ev-switch { border: 1px solid #2563eb; color: #1d4ed8; }
 .tsh-ev-switch:hover { background: #eff6ff; }
 .tsh-ev-drop { border: 1px solid #dc2626; color: #b91c1c; }

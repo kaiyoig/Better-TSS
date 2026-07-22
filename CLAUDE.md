@@ -50,14 +50,19 @@ Not yet exhaustively tested against a live TSS session.
     to its catalog section in the background (the feed names only the course — the panel probes
     each section's `ModuleHeaderSet` until the booking's `ModregId` matches; cached per booking),
     and exposes them via `AppContext.getBookings()`.
-    - **Calendar**: booked sections render on the grid — merged with the planned block (green
-      ring + "✓" prefix) when that section is planned, as extra blocks when not. The course strip
-      below shows "✓ Enrolled" badges, a green **Book** button for planned-but-not-booked
-      courses, rows for booked-only courses with **Drop from TSS**, and booked-only blocks'
-      Drop is the real TSS drop.
+    - **Colors encode state, not identity**: planned-only blocks are blue (`#bfdbfe`), enrolled
+      blocks green (`#bbf7d0`, plus a green ring + "✓" prefix).
+    - **Calendar**: booked sections render on the grid (merged with the planned block, or as
+      extra blocks when unplanned). Planned blocks carry **Book / Switch / Drop**; enrolled
+      blocks carry exactly one action — **Drop** (a real TSS drop). The course strip mirrors
+      this: Book/Switch/Drop on planned rows, badge + **Drop from TSS** on enrolled rows.
     - **List**: a "✓ Enrolled" flag under the course code ("✓ Enrolled*" = booked into a
-      *different* section), Status becomes "Enrolled" when the exact planned section is booked,
-      and the Action cell gains a **Book** button.
+      *different* section), Status becomes "Enrolled" when the exact planned section is booked.
+      Action cell: **Book**/Switch/Drop when planned-only, **Drop from TSS** alone when enrolled.
+    - **Enrolled classes never offer Switch or Book** — their sole action is the TSS drop.
+    - **Dropping an enrolled class is one action**: `dropTssAndUnplan` (`src/ui/bookingOps.ts`)
+      cancels in TSS, then removes the course from the active plan (plan untouched if TSS
+      refuses). Used by calendar, list, and the section cards alike.
     - Both views share `createBookingRunner` (`src/ui/bookingOps.ts`) for confirm + busy/error
       state.
   - Protocol: JSON POSTs to `ActionHdrSet` — Book = `CheckRegistration` then `SaveChanges`

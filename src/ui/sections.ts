@@ -3,6 +3,7 @@ import { courseKey, isUnscheduled } from "../model/planOps";
 import type { Plan } from "../model/plan";
 import { plannedSectionId } from "../model/plan";
 import { meetingsOverlap } from "../model/schedule";
+import { dropTssAndUnplan } from "./bookingOps";
 import type { AppContext } from "./context";
 import { clear, h } from "./dom";
 import { confirmBook, confirmTssDrop, errorMessage } from "./util";
@@ -188,7 +189,8 @@ export function createSections(ctx: AppContext): {
           title: `Cancel your ${c.abbr} enrollment in TSS`,
           onClick: () => {
             if (!confirmTssDrop(`${c.abbr} (${sec.eventPkgText})`)) return;
-            runBookingOp(c, sec, "Dropping…", () => ctx.client.dropSection(c, sec));
+            // Dropping an enrolled class also removes it from the active plan (one action).
+            runBookingOp(c, sec, "Dropping…", () => dropTssAndUnplan(ctx, c, sec));
           },
         }),
       ];

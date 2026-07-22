@@ -1,5 +1,5 @@
 import type { CourseSummary, Section } from "../api/types";
-import { courseKey } from "../model/planOps";
+import { courseKey, dropCourse } from "../model/planOps";
 import type { AppContext } from "./context";
 import { confirmBook, confirmTssDrop, errorMessage } from "./util";
 
@@ -16,6 +16,21 @@ export interface BookingRunner {
   book(course: CourseSummary, section: Section): void;
   /** Confirm + cancel a real TSS enrollment. */
   dropTss(course: CourseSummary, section: Section): void;
+}
+
+/**
+ * Cancel a TSS enrollment, then remove the course from the active plan too — dropping an enrolled
+ * class is one action, not two. Plan cleanup runs only after TSS accepts the drop (a refusal
+ * leaves the plan untouched) and is a no-op when the course isn't planned.
+ */
+export async function dropTssAndUnplan(
+  ctx: AppContext,
+  course: CourseSummary,
+  section: Section,
+): Promise<void> {
+  await ctx.client.dropSection(course, section);
+  const planId = ctx.getActivePlanId();
+  if (planId) await dropCourse(ctx.store, planId, courseKey(course));
 }
 
 export function createBookingRunner(ctx: AppContext, onChange: () => void): BookingRunner {
@@ -52,7 +67,7 @@ export function createBookingRunner(ctx: AppContext, onChange: () => void): Book
     },
     dropTss: (course, section) => {
       if (!confirmTssDrop(`${course.abbr} (${section.eventPkgText})`)) return;
-      run(course, "Dropping…", () => ctx.client.dropSection(course, section));
+      run(course, "Dropping…", () => dropTssAndUnplan(ctx, course, section));
     },
   };
 }
